@@ -1,0 +1,39 @@
+name: 'Terraform OIDC Test'
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  # 수동으로 실행할 수 있도록 workflow_dispatch 추가
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: 'Az CLI login with OIDC'
+      uses: azure/login@v1
+      with:
+        client-id: 49a5876d-cde1-4724-bad6-d267a5625804
+        tenant-id: \$(az account show --query tenantId -o tsv)
+        subscription-id: \$(az account show --query id -o tsv)
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      
+    - name: Terraform Init
+      run: terraform init
+      
+    - name: Terraform Plan
+      run: terraform plan
+      
+    - name: Terraform Apply
+      if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      run: terraform apply -auto-approve
