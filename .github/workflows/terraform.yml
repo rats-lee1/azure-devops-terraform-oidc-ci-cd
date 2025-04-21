@@ -20,7 +20,7 @@ jobs:
     - name: 'Az CLI login with OIDC'
       uses: azure/login@v1
       with:
-        client-id: ${{ vars.AZURE_CLIENT_ID || '49a5876d-cde1-4724-bad6-d267a5625804' }}
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
     
@@ -34,7 +34,7 @@ jobs:
       run: terraform plan
       env:
         ARM_USE_OIDC: true
-        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID || '49a5876d-cde1-4724-bad6-d267a5625804' }}
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       
@@ -43,6 +43,6 @@ jobs:
       run: terraform apply -auto-approve
       env:
         ARM_USE_OIDC: true
-        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID || '49a5876d-cde1-4724-bad6-d267a5625804' }}
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
