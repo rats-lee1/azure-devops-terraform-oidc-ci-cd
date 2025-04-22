@@ -13,7 +13,7 @@ provider "azurerm" {
 
 # Azure CLI를 사용하여 모든 리소스 그룹 이름 가져오기
 data "external" "resource_groups" {
-  program = ["bash", "-c", "az group list --query \"[].name\" -o json | jq -r '{resource_groups: .}'"]
+  program = ["bash", "-c", "az group list --query \"[].name\" | tr -d '\\n' | jq -c '{resource_groups: @json}'"]
 }
 
 locals {
