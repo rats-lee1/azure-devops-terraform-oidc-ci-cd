@@ -22,8 +22,32 @@ provider "azurerm" {
   # use_oidc, client_id 등은 생략 가능 (GitHub Actions에서 환경 변수로 설정)
 }
 
+# 구독 내의 모든 리소스 그룹 조회
+data "azurerm_resources" "existing_resource_groups" {
+  type = "Microsoft.Resources/resourceGroups"
+}
+
+locals {
+  # 기본 리소스 그룹 이름
+  base_rg_name = "rg-oidc-test"
+  
+  # 모든 리소스 그룹 이름 추출
+  existing_rg_names = [for rg in data.azurerm_resources.existing_resource_groups.resources : rg.name]
+  
+  # 이름이 기본 이름으로 시작하는 리소스 그룹 찾기
+  matching_rgs = [for name in local.existing_rg_names : name if startswith(name, local.base_rg_name)]
+  
+  # 기본 이름이 존재하지 않으면 그대로 사용, 존재하면 숫자 부여
+  rg_name = contains(local.existing_rg_names, local.base_rg_name) ? (
+    # 기존 이름으로 시작하는 리소스 그룹 이름에서 최대 숫자 찾기
+    length(local.matching_rgs) > 0 ? (
+      "${local.base_rg_name}-${length(local.matching_rgs) + 1}"
+    ) : "${local.base_rg_name}-1"
+  ) : local.base_rg_name
+}
+
 resource "azurerm_resource_group" "example" {
-  name     = "rg-oidc-test"
+  name     = local.rg_name
   location = "eastus"
   
   tags = {
@@ -31,4 +55,9 @@ resource "azurerm_resource_group" "example" {
     deployed_by = "terraform-oidc"
     created_at  = formatdate("YYYY-MM-DD", timestamp())
   }
+}
+
+output "resource_group_name" {
+  value = azurerm_resource_group.example.name
+  description = "생성된 리소스 그룹의 이름"
 }
