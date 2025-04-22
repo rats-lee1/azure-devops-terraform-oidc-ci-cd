@@ -5,45 +5,36 @@ terraform {
       version = ">=3.0.0"
     }
   }
-  
-  # 필요하다면 여기에 백엔드 구성 추가
-  # backend "azurerm" {
-  #   resource_group_name  = "tfstate"
-  #   storage_account_name = "<storage_account_name>"
-  #   container_name       = "tfstate"
-  #   key                  = "terraform.tfstate"
-  #   use_oidc             = true
-  # }
 }
 
 provider "azurerm" {
   features {}
-  # 환경 변수에서 자동으로 OIDC 토큰을 가져오므로 여기서 명시적 설정은 필요 없음
-  # use_oidc, client_id 등은 생략 가능 (GitHub Actions에서 환경 변수로 설정)
 }
 
-# 구독 내의 모든 리소스 그룹 조회
-data "azurerm_resources" "existing_resource_groups" {
-  type = "Microsoft.Resources/resourceGroups"
-}
+# 모든 리소스 그룹 목록 가져오기 - ID 기반으로 확인
+data "azurerm_resource_groups" "all" {}
 
 locals {
   # 기본 리소스 그룹 이름
   base_rg_name = "rg-oidc-test"
   
-  # 모든 리소스 그룹 이름 추출
-  existing_rg_names = [for rg in data.azurerm_resources.existing_resource_groups.resources : rg.name]
+  # 모든 기존 리소스 그룹 이름 목록
+  existing_rg_names = data.azurerm_resource_groups.all.names
   
-  # 이름이 기본 이름으로 시작하는 리소스 그룹 찾기
+  # 기본 이름으로 시작하는 리소스 그룹 필터링
   matching_rgs = [for name in local.existing_rg_names : name if startswith(name, local.base_rg_name)]
   
-  # 기본 이름이 존재하지 않으면 그대로 사용, 존재하면 숫자 부여
-  rg_name = contains(local.existing_rg_names, local.base_rg_name) ? (
-    # 기존 이름으로 시작하는 리소스 그룹 이름에서 최대 숫자 찾기
-    length(local.matching_rgs) > 0 ? (
-      "${local.base_rg_name}-${length(local.matching_rgs) + 1}"
-    ) : "${local.base_rg_name}-1"
-  ) : local.base_rg_name
+  # 숫자 버전이 있는 경우 (예: rg-oidc-test-1) 가장 큰 숫자 찾기
+  numbered_rgs = [for name in local.matching_rgs : 
+    tonumber(replace(name, "${local.base_rg_name}-", "")) 
+    if length(regexall("^${local.base_rg_name}-[0-9]+$", name)) > 0
+  ]
+  
+  # 최대 숫자 계산 (있으면 최대값+1, 없으면 1)
+  max_number = length(local.numbered_rgs) > 0 ? max(local.numbered_rgs...) + 1 : 1
+  
+  # 최종 리소스 그룹 이름 결정
+  rg_name = contains(local.existing_rg_names, local.base_rg_name) ? "${local.base_rg_name}-${local.max_number}" : local.base_rg_name
 }
 
 resource "azurerm_resource_group" "example" {
