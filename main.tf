@@ -27,18 +27,18 @@ locals {
   matching_rgs = [for name in local.existing_rg_names : name if substr(name, 0, length(local.base_rg_name)) == local.base_rg_name]
   
   # 숫자 버전이 있는 경우 (예: rg-oidc-test-1) 가장 큰 숫자 찾기
-  numbered_rgs = [for name in local.matching_rgs : 
-    tonumber(replace(name, "${local.base_rg_name}-", "")) 
+  numbered_rgs = [
+    for name in local.matching_rgs : 
+    tonumber(replace(name, "${local.base_rg_name}-", ""))
     if length(regexall("^${local.base_rg_name}-[0-9]+$", name)) > 0
   ]
   
   # 최대 숫자 계산 (있으면 최대값+1, 없으면 1)
   max_number = length(local.numbered_rgs) > 0 ? max(local.numbered_rgs...) + 1 : 1
   
-  # 최종 리소스 그룹 이름 결정
+  # 최종 리소스 그룹 이름 결정 - 기존 리소스 그룹이 이미 있으면 숫자가 붙은 이름 사용
   rg_name = contains(local.existing_rg_names, local.base_rg_name) ? "${local.base_rg_name}-${local.max_number}" : local.base_rg_name
 }
-
 resource "azurerm_resource_group" "example" {
   name     = local.rg_name
   location = var.location
