@@ -9,6 +9,12 @@ terraform {
       version = ">=3.0.0"
     }
   }
+  backend "azurerm" {
+    resource_group_name  = "terraform-state-rg"
+    storage_account_name = "tfstatebithumbdev"
+    container_name       = "tfstate"
+    key                  = "terraform/dev/rg_dev_test/terraform.tfstate"
+  }
 }
 
 provider "azurerm" {
