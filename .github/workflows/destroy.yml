@@ -8,6 +8,10 @@ on:
         required: false
         type: string
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   terraform-destroy:
     runs-on: ubuntu-latest
