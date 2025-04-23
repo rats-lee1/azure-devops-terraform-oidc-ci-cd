@@ -1,4 +1,4 @@
-name: 'Terraform OIDC Issue Workflow'
+name: 'Resource Group Issue Workflow'
 
 on:
   issues:
@@ -21,8 +21,8 @@ jobs:
         run: |
           # 이슈에 'resource group' 라벨이 있는지 확인
           LABEL="${{ github.event.label.name }}"
-          if [ "$LABEL" != "resource group" ]; then
-            echo "❌ This workflow only runs when the 'resource group' label is added."
+          if [ "$LABEL" != "resource_group" ]; then
+            echo "❌ This workflow only runs when the 'resource_group' label is added."
             exit 1
           fi
           echo "✅ Resource Group label detected."
@@ -33,10 +33,15 @@ jobs:
         run: |
           ISSUE_BODY="${{ github.event.issue.body }}"
           
-          # 이슈 본문에서 "리소스 그룹:" 또는 "Resource Group:" 패턴을 찾음
-          RESOURCE_GROUP=$(echo "$ISSUE_BODY" | grep -i -o "리소스 그룹:[ ]*[a-zA-Z0-9_-]\+" | sed 's/리소스 그룹:[ ]*//')
+          # 이슈 본문에서 "리소스_그룹명:" 패턴을 찾음
+          RESOURCE_GROUP=$(echo "$ISSUE_BODY" | grep -i -o "리소스_그룹명:[ ]*[a-zA-Z0-9_-]\+" | sed 's/리소스_그룹명:[ ]*//')
           
-          # 첫 번째 패턴이 없다면 영문 패턴도 확인
+          # 첫 번째 패턴이 없다면 다른 패턴도 확인
+          if [ -z "$RESOURCE_GROUP" ]; then
+            RESOURCE_GROUP=$(echo "$ISSUE_BODY" | grep -i -o "리소스 그룹:[ ]*[a-zA-Z0-9_-]\+" | sed 's/리소스 그룹:[ ]*//')
+          fi
+          
+          # 영문 패턴도 확인
           if [ -z "$RESOURCE_GROUP" ]; then
             RESOURCE_GROUP=$(echo "$ISSUE_BODY" | grep -i -o "resource group:[ ]*[a-zA-Z0-9_-]\+" | sed 's/resource group:[ ]*//')
           fi
@@ -51,12 +56,9 @@ jobs:
             echo "resource_group=$RESOURCE_GROUP" >> $GITHUB_OUTPUT
           fi
 
-  terraform:
+  terraform-plan:
     needs: check-label-and-extract-resource-group
     runs-on: ubuntu-latest
-    environment: 
-      name: production
-      url: ${{ github.server_url }}/${{ github.repository }}/issues/${{ github.event.issue.number }}
     
     env:
       ARM_USE_OIDC: true
@@ -101,6 +103,13 @@ jobs:
         id: plan
         run: terraform plan -var="resource_group_name=${TF_VAR_resource_group_name}" -out=tfplan
       
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-plan
+          path: tfplan
+          retention-days: 1
+      
       - name: Post Plan Result to Issue
         uses: actions/github-script@v6
         with:
@@ -117,9 +126,43 @@ jobs:
               
               Plan이 완료되었습니다. 팀장님의 승인 후 Apply가 진행됩니다.`
             });
+
+  terraform-apply:
+    needs: [check-label-and-extract-resource-group, terraform-plan]
+    runs-on: ubuntu-latest
+    environment: 
+      name: production
+      url: ${{ github.server_url }}/${{ github.repository }}/issues/${{ github.event.issue.number }}
+    
+    env:
+      ARM_USE_OIDC: true
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_resource_group_name: ${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: 'Az CLI login with OIDC'
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+      
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v3
+        with:
+          name: terraform-plan
+      
+      - name: Terraform Init
+        run: terraform init
       
       - name: Terraform Apply
-        if: ${{ success() }}
         run: terraform apply -auto-approve tfplan
       
       - name: Post Apply Result to Issue
