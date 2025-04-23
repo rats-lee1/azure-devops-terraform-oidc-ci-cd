@@ -13,7 +13,7 @@ body:
   - type: input
     id: resource-group-name
     attributes:
-      label: 리소스 그룹명
+      label: 리소스_그룹명
       description: 배포할 리소스 그룹의 이름을 입력하세요
       placeholder: 예시) rg-production-app1
     validations:
