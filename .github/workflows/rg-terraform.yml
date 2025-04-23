@@ -277,16 +277,34 @@ jobs:
       - uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body: `## Terraform Apply 거절됨 ❌
+        script: |
+          const {owner, repo} = context.repo;
+          const issue_number = context.payload.issue.number;
 
-              팀장님이 배포 요청을 반려했습니다.  
-              이슈를 수정한 뒤 'resource_group' 라벨을 다시 달아 재요청해 주세요.`
-            })
+          // 1) 거절 코멘트
+          await github.rest.issues.createComment({
+            owner, repo, issue_number,
+            body: `## Terraform Apply 거절됨 ❌
+
+            팀장님이 배포 요청을 반려했습니다.  
+            이슈 내용을 수정한 뒤 **'resource_group' 라벨을 다시 달아** 재요청해 주세요.`
+          });
+
+          // 2) 기존 resource_group 라벨 제거
+          try {
+            await github.rest.issues.removeLabel({
+              owner, repo, issue_number,
+              name: 'resource_group'
+            });
+          } catch (e) {
+            // 이미 없을 수도 있으므로 무시
+          }
+
+          // 3) 상태 표시용 라벨 추가(선택)
+          await github.rest.issues.addLabels({
+            owner, repo, issue_number,
+            labels: ['deployment-rejected']
+          });
 
   cleanup-artifacts:
     needs: [terraform-apply, handle-rejection]
