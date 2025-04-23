@@ -13,8 +13,8 @@ permissions:
 jobs:
   check-label-and-extract-resource-group:
     runs-on: ubuntu-latest
-    # 라벨 이벤트인 경우 'resource group' 라벨이 있을 때만 실행
-    if: github.event.label.name == 'resource group' || contains(github.event.issue.labels.*.name, 'resource group')
+    # 라벨 이벤트인 경우 'resource_group' 라벨이 있을 때만 실행
+    if: github.event.label.name == 'resource_group' || contains(github.event.issue.labels.*.name, 'resource_group')
     outputs:
       resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
     steps:
@@ -28,19 +28,19 @@ jobs:
           if [ "${{ github.event_name }}" = "issues" ] && [ "${{ github.event.action }}" = "labeled" ]; then
             # 라벨 이벤트인 경우
             LABEL="${{ github.event.label.name }}"
-            if [ "$LABEL" = "resource group" ]; then
+            if [ "$LABEL" = "resource_group" ]; then
               IS_LABELED=true
             fi
           else
             # 이슈 오픈 이벤트인 경우 라벨 목록 확인
             LABELS="${{ toJSON(github.event.issue.labels) }}"
-            if [[ $LABELS == *"resource group"* ]]; then
+            if [[ $LABELS == *"resource_group"* ]]; then
               IS_LABELED=true
             fi
           fi
           
           if [ "$IS_LABELED" = "false" ]; then
-            echo "❌ This workflow only runs with the 'resource group' label."
+            echo "❌ This workflow only runs with the 'resource_group' label."
             exit 1
           fi
           
