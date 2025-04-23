@@ -257,38 +257,23 @@ jobs:
               인프라 배포가 완료되었습니다.`
             });
 
-  handle-rejection:
-    needs: [check-label-and-extract-resource-group, terraform-plan]
+  handle-rejection:                # 💡 새로 추가
+    needs: terraform-apply
+    if: needs.terraform-apply.result == 'cancelled'
     runs-on: ubuntu-latest
-    if: ${{ contains(github.event.workflow_run, 'rejected') || github.event.review.state == 'rejected' }}
-    
     steps:
-      - name: Post Rejection Notification to Issue
-        uses: actions/github-script@v6
+      - uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const issue_number = context.payload.issue.number;
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issue_number,
+              issue_number: context.payload.issue.number,
               body: `## Terraform Apply 거절됨 ❌
-              
-              리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\`에 대한
-              인프라 배포 요청이 거절되었습니다.
-              
-              조치사항:
-              1. 이슈를 검토하고 필요한 수정을 진행하세요
-              2. 수정 후 'resource_group' 라벨을 제거했다가 다시 추가하여 워크플로우를 재시작하세요`
-            });
-            
-            // 라벨 추가 - 거절됨 상태 표시
-            github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issue_number,
-              labels: ['deployment-rejected']
+
+              팀장님이 배포 요청을 반려했습니다.  
+              이슈를 수정한 뒤 'resource_group' 라벨을 다시 달아 재요청해 주세요.`
             });
 
   cleanup-artifacts:
