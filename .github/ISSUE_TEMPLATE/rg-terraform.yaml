@@ -19,11 +19,6 @@ body:
     validations:
       required: true
 
-  - type: markdown
-    attributes:
-      value: |
-        ## 배포 이유
-
   - type: textarea
     id: deployment-reason
     attributes:
