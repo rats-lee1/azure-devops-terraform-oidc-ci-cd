@@ -21,25 +21,6 @@ provider "azurerm" {
   features {}
 }
 
-# 워크플로우에서 전달받은 리소스 그룹명 변수
-variable "resource_group_name" {
-  description = "GitHub 이슈에서 추출한 리소스 그룹 이름"
-  type        = string
-}
-
-# 추가 필요한 변수들
-variable "location" {
-  description = "Azure 리소스를 배포할 지역"
-  type        = string
-  default     = "Korea Central"
-}
-
-variable "base_name" {
-  description = "기본 리소스 그룹 이름 접두사 (자동 넘버링이 필요할 경우)"
-  type        = string
-  default     = ""
-}
-
 # Azure CLI를 통해 모든 리소스 그룹 이름 가져오기 (기존 로직은 유지하지만 조건부로 실행)
 data "external" "resource_groups" {
   count = var.base_name != "" ? 1 : 0
