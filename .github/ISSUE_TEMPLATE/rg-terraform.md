@@ -1,28 +1,89 @@
----
 name: 리소스 그룹 배포 요청
-about: 새로운 리소스 그룹 배포 또는 기존 리소스 그룹 업데이트 요청
+description: 새로운 리소스 그룹 배포 또는 기존 리소스 그룹 업데이트 요청
 title: "[리소스 배포] "
-labels: resource group
-assignees: ''
----
+labels: ["resource group"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 리소스 그룹 정보
+        아래 정보를 정확히 입력해주세요. 이 정보는 자동화된 배포 프로세스에 사용됩니다.
 
-## 리소스 그룹 정보
-<!-- 아래 정보를 정확히 입력해주세요. 이 정보는 자동화된 배포 프로세스에 사용됩니다. -->
+  - type: input
+    id: resource-group-name
+    attributes:
+      label: 리소스 그룹명
+      description: 배포할 리소스 그룹의 이름을 입력하세요
+      placeholder: 예시) rg-production-app1
+    validations:
+      required: true
 
-리소스_그룹명: ____________________________
+  - type: markdown
+    attributes:
+      value: |
+        ## 배포 이유
 
-## 배포 이유
-<!-- 이 리소스 그룹을 배포하거나 업데이트하는 이유를 상세히 설명해주세요 -->
+  - type: textarea
+    id: deployment-reason
+    attributes:
+      label: 배포 이유
+      description: 이 리소스 그룹을 배포하거나 업데이트하는 이유를 상세히 설명해주세요
+      placeholder: 배포 이유를 입력하세요...
+    validations:
+      required: true
 
+  - type: markdown
+    attributes:
+      value: |
+        ## 배포 세부 정보
+        추가적인 배포 세부 사항이 있다면 아래에 작성해주세요.
 
-## 배포 세부 정보
-<!-- 추가적인 배포 세부 사항이 있다면 아래에 작성해주세요 -->
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 환경
+      description: 배포 대상 환경을 선택하세요
+      options:
+        - 개발(Development)
+        - 테스트(Test)
+        - 스테이징(Staging)
+        - 프로덕션(Production)
+    validations:
+      required: true
 
-### 환경
-- [ ] 개발(Development)
-- [ ] 테스트(Test)
-- [ ] 스테이징(Staging)
-- [ ] 프로덕션(Production)
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 우선순위
+      description: 배포 우선순위를 선택하세요
+      options:
+        - 낮음(Low)
+        - 보통(Medium)
+        - 높음(High)
+        - 긴급(Critical)
+    validations:
+      required: true
 
-## 추가 정보
-<!-- 배포 과정에서 고려해야 할 추가 정보나 주의사항이 있다면 작성해주세요 -->
+  - type: input
+    id: expected-completion
+    attributes:
+      label: 예상 완료일
+      description: 필요한 경우 예상 완료일을 입력하세요 (YYYY-MM-DD)
+      placeholder: 예시) 2025-04-30
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 추가 정보
+
+  - type: textarea
+    id: additional-info
+    attributes:
+      label: 추가 정보
+      description: 배포 과정에서 고려해야 할 추가 정보나 주의사항이 있다면 작성해주세요
+      placeholder: 추가 정보를 입력하세요...
+    validations:
+      required: false
