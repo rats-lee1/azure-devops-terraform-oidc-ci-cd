@@ -1,0 +1,140 @@
+name: 'Terraform OIDC Issue Workflow'
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  issues: read
+
+jobs:
+  check-label-and-extract-resource-group:
+    runs-on: ubuntu-latest
+    outputs:
+      resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
+    steps:
+      - name: Check for Resource Group Label
+        id: check-label
+        run: |
+          # 이슈에 'resource group' 라벨이 있는지 확인
+          LABEL="${{ github.event.label.name }}"
+          if [ "$LABEL" != "resource group" ]; then
+            echo "❌ This workflow only runs when the 'resource group' label is added."
+            exit 1
+          fi
+          echo "✅ Resource Group label detected."
+      
+      - name: Extract Resource Group from Issue
+        id: get-resource-group
+        if: success()
+        run: |
+          ISSUE_BODY="${{ github.event.issue.body }}"
+          
+          # 이슈 본문에서 "리소스 그룹:" 또는 "Resource Group:" 패턴을 찾음
+          RESOURCE_GROUP=$(echo "$ISSUE_BODY" | grep -i -o "리소스 그룹:[ ]*[a-zA-Z0-9_-]\+" | sed 's/리소스 그룹:[ ]*//')
+          
+          # 첫 번째 패턴이 없다면 영문 패턴도 확인
+          if [ -z "$RESOURCE_GROUP" ]; then
+            RESOURCE_GROUP=$(echo "$ISSUE_BODY" | grep -i -o "resource group:[ ]*[a-zA-Z0-9_-]\+" | sed 's/resource group:[ ]*//')
+          fi
+          
+          # 리소스 그룹이 추출되지 않았다면 기본값 설정
+          if [ -z "$RESOURCE_GROUP" ]; then
+            echo "❌ Resource Group not found in the issue body."
+            echo "resource_group=default-resource-group" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "✅ Extracted Resource Group: $RESOURCE_GROUP"
+            echo "resource_group=$RESOURCE_GROUP" >> $GITHUB_OUTPUT
+          fi
+
+  terraform:
+    needs: check-label-and-extract-resource-group
+    runs-on: ubuntu-latest
+    environment: 
+      name: production
+      url: ${{ github.server_url }}/${{ github.repository }}/issues/${{ github.event.issue.number }}
+    
+    env:
+      ARM_USE_OIDC: true
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_resource_group_name: ${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: 'Check if secrets are set'
+        run: |
+          if [ -z "${{ secrets.AZURE_CLIENT_ID }}" ]; then
+            echo "❌ AZURE_CLIENT_ID is missing"
+            exit 1
+          fi
+          if [ -z "${{ secrets.AZURE_TENANT_ID }}" ]; then
+            echo "❌ AZURE_TENANT_ID is missing"
+            exit 1
+          fi
+          if [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ]; then
+            echo "❌ AZURE_SUBSCRIPTION_ID is missing"
+            exit 1
+          fi
+          echo "✅ All secrets are set"
+      
+      - name: 'Az CLI login with OIDC'
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+      
+      - name: Terraform Init
+        run: terraform init
+      
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -var="resource_group_name=${TF_VAR_resource_group_name}" -out=tfplan
+      
+      - name: Post Plan Result to Issue
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = context.payload.issue.number;
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue_number,
+              body: `## Terraform Plan 완료 ✅
+              
+              리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\`
+              
+              Plan이 완료되었습니다. 팀장님의 승인 후 Apply가 진행됩니다.`
+            });
+      
+      - name: Terraform Apply
+        if: ${{ success() }}
+        run: terraform apply -auto-approve tfplan
+      
+      - name: Post Apply Result to Issue
+        if: ${{ success() }}
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = context.payload.issue.number;
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue_number,
+              body: `## Terraform Apply 완료 ✅
+              
+              리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\`에 
+              인프라 배포가 완료되었습니다.`
+            });
