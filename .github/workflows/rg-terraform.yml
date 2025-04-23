@@ -200,6 +200,8 @@ jobs:
       url: ${{ github.server_url }}/${{ github.repository }}/issues/${{ github.event.issue.number }}
     outputs:
       approval_status: ${{ steps.get_approval_status.outputs.status }}
+      started: ${{ steps.mark-start.outputs.started }}
+
     
     env:
       ARM_USE_OIDC: true
@@ -216,7 +218,11 @@ jobs:
           # GitHub Actions에서는 이 값을 직접 얻을 수 없으므로, 그냥 성공했다고 가정
           # 실제로는 워크플로우가 여기까지 진행되면 승인된 것임
           echo "status=approved" >> $GITHUB_OUTPUT
-      
+
+      - name: Mark job started
+        id: mark-start
+        run: echo "started=true" >> $GITHUB_OUTPUT
+
       - uses: actions/checkout@v3
       
       - name: 'Az CLI login with OIDC'
@@ -257,9 +263,11 @@ jobs:
               인프라 배포가 완료되었습니다.`
             });
 
-  handle-rejection:                # 💡 새로 추가
+  handle-rejection:
     needs: terraform-apply
-    if: needs.terraform-apply.result == 'cancelled'
+    # ✅ 3) Reject 조건 : 실패 + started 출력이 비어 있음
+    if: needs.terraform-apply.result == 'failure' &&
+        needs.terraform-apply.outputs.started != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v6
@@ -274,7 +282,7 @@ jobs:
 
               팀장님이 배포 요청을 반려했습니다.  
               이슈를 수정한 뒤 'resource_group' 라벨을 다시 달아 재요청해 주세요.`
-            });
+            })
 
   cleanup-artifacts:
     needs: [terraform-apply, handle-rejection]
