@@ -198,6 +198,8 @@ jobs:
     environment: 
       name: production
       url: ${{ github.server_url }}/${{ github.repository }}/issues/${{ github.event.issue.number }}
+    outputs:
+      approval_status: ${{ steps.get_approval_status.outputs.status }}
     
     env:
       ARM_USE_OIDC: true
@@ -207,6 +209,14 @@ jobs:
       TF_VAR_resource_group_name: ${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}
     
     steps:
+      - name: Get Approval Status
+        id: get_approval_status
+        run: |
+          # 환경 보호 검토 상태 확인
+          # GitHub Actions에서는 이 값을 직접 얻을 수 없으므로, 그냥 성공했다고 가정
+          # 실제로는 워크플로우가 여기까지 진행되면 승인된 것임
+          echo "status=approved" >> $GITHUB_OUTPUT
+      
       - uses: actions/checkout@v3
       
       - name: 'Az CLI login with OIDC'
@@ -246,3 +256,49 @@ jobs:
               리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\`에 
               인프라 배포가 완료되었습니다.`
             });
+
+  handle-rejection:
+    needs: [check-label-and-extract-resource-group, terraform-plan]
+    runs-on: ubuntu-latest
+    if: ${{ contains(github.event.workflow_run, 'rejected') || github.event.review.state == 'rejected' }}
+    
+    steps:
+      - name: Post Rejection Notification to Issue
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = context.payload.issue.number;
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue_number,
+              body: `## Terraform Apply 거절됨 ❌
+              
+              리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\`에 대한
+              인프라 배포 요청이 거절되었습니다.
+              
+              조치사항:
+              1. 이슈를 검토하고 필요한 수정을 진행하세요
+              2. 수정 후 'resource_group' 라벨을 제거했다가 다시 추가하여 워크플로우를 재시작하세요`
+            });
+            
+            // 라벨 추가 - 거절됨 상태 표시
+            github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue_number,
+              labels: ['deployment-rejected']
+            });
+
+  cleanup-artifacts:
+    needs: [terraform-apply, handle-rejection]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Remove Terraform Plan Artifact
+        uses: geekyeggo/delete-artifact@v2
+        with:
+          name: terraform-plan
+          failOnError: false
