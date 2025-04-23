@@ -169,7 +169,7 @@ jobs:
         run: terraform plan -var="resource_group_name=${TF_VAR_resource_group_name}" -out=tfplan
       
       - name: Upload Terraform Plan
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: terraform-plan
           path: tfplan
@@ -220,7 +220,7 @@ jobs:
         uses: hashicorp/setup-terraform@v2
       
       - name: Download Terraform Plan
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: terraform-plan
       
