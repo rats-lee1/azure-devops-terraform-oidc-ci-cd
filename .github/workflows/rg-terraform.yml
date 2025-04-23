@@ -307,13 +307,18 @@ jobs:
             });
 
   cleanup-artifacts:
-    needs: [terraform-apply, handle-rejection]
+    needs: [terraform-plan, handle-rejection]
+    # terraform-plan 이 실제로 성공했을 때만 실행
+    if: always() && needs.terraform-plan.result == 'success'
     runs-on: ubuntu-latest
-    if: always()
-    
+
+    # 🟢 아티팩트 삭제용 API 호출 권한
+    permissions:
+      actions: write
+
     steps:
       - name: Remove Terraform Plan Artifact
         uses: geekyeggo/delete-artifact@v2
         with:
           name: terraform-plan
-          failOnError: false
+          failOnError: false   # 이름 불일치 시에도 워크플로 실패로 만들지 않음
