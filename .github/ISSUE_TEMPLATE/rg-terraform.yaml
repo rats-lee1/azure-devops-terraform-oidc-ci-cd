@@ -1,6 +1,6 @@
 name: 리소스 그룹 배포 요청
 description: 새로운 리소스 그룹 배포 또는 기존 리소스 그룹 업데이트 요청
-title: "[리소스 배포] "
+title: "[POC-INIT] "
 labels: ["resource_group"]
 assignees: []
 body:
