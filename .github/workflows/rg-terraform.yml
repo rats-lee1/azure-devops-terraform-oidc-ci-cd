@@ -201,8 +201,7 @@ jobs:
     outputs:
       approval_status: ${{ steps.get_approval_status.outputs.status }}
       started: ${{ steps.mark-start.outputs.started }}
-
-    
+      
     env:
       ARM_USE_OIDC: true
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -259,19 +258,19 @@ jobs:
               issue_number: issue_number,
               body: `## Terraform Apply 완료 ✅
               
-              리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\`에 
+              리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\` 
               인프라 배포가 완료되었습니다.`
             });
 
   handle-rejection:
     needs: terraform-apply
-    # ✅ 3) Reject 조건 : 실패 + started 출력이 비어 있음
+    # 수정된 조건: terraform-apply가 완료되기 전에 실패하거나 취소된 경우에만 실행
     if: >
-      ${{ always() &&
-          (needs.terraform-apply.result == 'failure' ||
-          needs.terraform-apply.result == 'skipped' ||
-          needs.terraform-apply.result == 'cancelled') &&
-          needs.terraform-apply.outputs.started != 'true' }}
+      always() && 
+      (needs.terraform-apply.result == 'failure' || 
+       needs.terraform-apply.result == 'cancelled' || 
+       needs.terraform-apply.result == 'skipped') && 
+      needs.terraform-apply.outputs.started != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v6
