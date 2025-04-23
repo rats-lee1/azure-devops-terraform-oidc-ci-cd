@@ -65,31 +65,49 @@ jobs:
             let resourceGroup = null;
             const issueBody = issue.data.body;
             
-            // Issue Forms 형식인 경우
-            if (issueBody.includes('### 리소스 그룹명') || issueBody.includes('### Resource group name')) {
-              // Issue Forms의 구조화된 데이터에서 리소스 그룹명 추출
-              const lines = issueBody.split('\n');
-              for (let i = 0; i < lines.length; i++) {
-                if (lines[i].includes('### 리소스 그룹명') || lines[i].includes('### Resource group name')) {
-                  // 다음 줄이 리소스 그룹명
-                  if (i + 1 < lines.length) {
-                    resourceGroup = lines[i + 1].trim();
+            // GitHub Issue Forms 형식(structured forms) 파싱
+            // 이슈 템플릿의 input field "id: resource-group-name"과 "label: 리소스_그룹명" 찾기
+            if (issueBody) {
+              // 방법 1: label로 찾기
+              const rgLabelMatch = issueBody.match(/###\s+리소스_그룹명\s*([\s\S]*?)(?=###|$)/);
+              if (rgLabelMatch && rgLabelMatch[1]) {
+                resourceGroup = rgLabelMatch[1].trim();
+              }
+              
+              // 방법 2: 여러 가능한 형식 고려하기
+              if (!resourceGroup) {
+                const possiblePatterns = [
+                  /###\s+리소스_그룹명\s*([\s\S]*?)(?=###|$)/,
+                  /리소스_그룹명:?\s*([a-zA-Z0-9_-]+)/i,
+                  /리소스\s+그룹:?\s*([a-zA-Z0-9_-]+)/i,
+                  /resource\s+group:?\s*([a-zA-Z0-9_-]+)/i,
+                  /배포할\s+리소스\s+그룹의\s+이름.*\n\s*([a-zA-Z0-9_-]+)/i
+                ];
+                
+                for (const pattern of possiblePatterns) {
+                  const match = issueBody.match(pattern);
+                  if (match && match[1]) {
+                    resourceGroup = match[1].trim();
                     break;
                   }
                 }
               }
-            } else {
-              // 기존 텍스트 형식인 경우 정규식으로 추출
-              const resourceGroupPatterns = [
-                /리소스_그룹명:\s*([a-zA-Z0-9_-]+)/i,
-                /리소스\s+그룹:\s*([a-zA-Z0-9_-]+)/i,
-                /resource\s+group:\s*([a-zA-Z0-9_-]+)/i
-              ];
+            }
+            
+            if (!resourceGroup) {
+              console.log('❌ Resource Group name not found in the issue body using standard patterns');
               
-              for (const pattern of resourceGroupPatterns) {
-                const match = issueBody.match(pattern);
-                if (match && match[1]) {
-                  resourceGroup = match[1];
+              // 마지막 시도: 이슈 본문에서 가능한 리소스 그룹명 찾기
+              const lines = issueBody.split('\n');
+              for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                // 알파벳, 숫자, 하이픈, 언더스코어로 구성된 가능한 리소스 그룹명 패턴
+                const rgNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]{2,62}$/;
+                
+                if (rgNamePattern.test(line) && line.indexOf(' ') === -1) {
+                  // 공백 없는 적합한 명명 규칙을 가진 줄이 있을 경우
+                  resourceGroup = line;
+                  console.log(`✅ Found potential resource group name: ${resourceGroup}`);
                   break;
                 }
               }
@@ -100,7 +118,7 @@ jobs:
               return;
             }
             
-            console.log(`Resource Group name: ${resourceGroup}`);
+            console.log(`✅ Resource Group name: ${resourceGroup}`);
             core.setOutput('resource_group', resourceGroup);
 
   terraform-plan:
