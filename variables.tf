@@ -1,16 +1,16 @@
-variable "location" {
-  description = "Azure 리전"
+variable "resource_group_name" {
+  description = "GitHub 이슈에서 추출한 리소스 그룹 이름"
   type        = string
-  default     = "eastus"
+}
+
+variable "location" {
+  description = "Azure 리소스를 배포할 지역"
+  type        = string
+  default     = "Korea Central"
 }
 
 variable "base_name" {
-  description = "리소스 이름의 기본 부분"
+  description = "기본 리소스 그룹 이름 접두사 (자동 넘버링이 필요할 경우)"
   type        = string
-  default     = "rg-oidc-test"
-}
-
-variable "resource_group_name" {
-  description = "Name of the resource group"
-  type        = string
+  default     = ""
 }
