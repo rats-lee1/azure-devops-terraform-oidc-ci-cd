@@ -11,7 +11,7 @@ permissions:
   issues: write
 
 jobs:
-pre-checking:
+  pre-checking:
     runs-on: ubuntu-latest
 
     outputs:
