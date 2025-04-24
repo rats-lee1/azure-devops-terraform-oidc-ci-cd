@@ -203,9 +203,6 @@ jobs:
           # 요약 추가
           echo "## Terraform Plan 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
-          echo "- 추가될 리소스: **${RESOURCES_TO_ADD}**개" >> $GITHUB_STEP_SUMMARY
-          echo "- 변경될 리소스: **${RESOURCES_TO_CHANGE}**개" >> $GITHUB_STEP_SUMMARY
-          echo "- 삭제될 리소스: **${RESOURCES_TO_DESTROY}**개" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ Plan 완료" >> $GITHUB_STEP_SUMMARY
       
       - name: Upload Terraform Plan
