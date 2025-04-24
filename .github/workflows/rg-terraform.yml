@@ -320,10 +320,6 @@ jobs:
           fi
           echo "✅ All secrets are set"
           echo "secrets_status=$SECRETS_STATUS" >> $GITHUB_OUTPUT
-          
-          # 요약 추가
-          echo "## Azure 시크릿 확인" >> $GITHUB_STEP_SUMMARY
-          echo "- 상태: $SECRETS_STATUS" >> $GITHUB_STEP_SUMMARY
       
       - name: 'Az CLI login with OIDC'
         id: azure-login
@@ -562,7 +558,7 @@ jobs:
             });
 
   cleanup-artifacts:
-    needs: [terraform-plan, handle-rejection, handle-missing-poc]
+    needs: [terraform-plan, handle-rejection]
     if: always()
     runs-on: ubuntu-latest
 
