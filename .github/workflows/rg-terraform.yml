@@ -245,7 +245,7 @@ jobs:
           echo "- 상태: ✅ 검증 완료" >> $GITHUB_STEP_SUMMARY
 
   terraform-plan:
-    needs: check-label-and-extract-resource-group
+    needs: pre-checking
     runs-on: ubuntu-latest
     
     env:
@@ -253,7 +253,7 @@ jobs:
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      TF_VAR_resource_group_name: ${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}
+      TF_VAR_resource_group_name: ${{ needs.pre-checking.outputs.resource_group }}
     
     steps:
       - uses: actions/checkout@v3
@@ -340,13 +340,13 @@ jobs:
               issue_number: issue_number,
               body: `## Terraform Plan 완료 ✅
               
-              리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\`
+              리소스 그룹: \`${{ needs.pre-checking.outputs.resource_group }}\`
               
               Plan이 완료되었습니다. 팀장님의 승인 후 Apply가 진행됩니다.`
             });
 
   terraform-apply:
-    needs: [check-label-and-extract-resource-group, terraform-plan]
+    needs: [pre-checking, terraform-plan]
     runs-on: ubuntu-latest
     environment: 
       name: production
@@ -360,7 +360,7 @@ jobs:
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      TF_VAR_resource_group_name: ${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}
+      TF_VAR_resource_group_name: ${{ needs.pre-checking.outputs.resource_group }}
     
     steps:
       - name: Get Approval Status
@@ -429,7 +429,7 @@ jobs:
               issue_number: issue_number,
               body: `## Terraform Apply 완료 ✅
               
-              리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\` 
+              리소스 그룹: \`${{ needs.pre-checking.outputs.resource_group }}\` 
               인프라 배포가 완료되었습니다.`
             });
 
@@ -447,7 +447,7 @@ jobs:
       - name: Update Summary for Rejection
         run: |
           echo "## 배포 거절 정보" >> $GITHUB_STEP_SUMMARY
-          echo "- 리소스 그룹: **${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 리소스 그룹: **${{ needs.pre-checking.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ❌ 배포 요청이 거절되었습니다" >> $GITHUB_STEP_SUMMARY
           echo "- 조치: 이슈에 거절 코멘트가 추가되었습니다" >> $GITHUB_STEP_SUMMARY
 
