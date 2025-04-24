@@ -192,11 +192,13 @@ jobs:
         run: |
           terraform plan -var="resource_group_name=${TF_VAR_resource_group_name}" -out=tfplan
           
-          # Plan 상태 캡처
+          # Plan 상태 캡처 (개선된 방식)
           PLAN_OUTPUT=$(terraform show -no-color tfplan)
-          RESOURCES_TO_ADD=$(echo "$PLAN_OUTPUT" | grep -c "# module\|# aws_\|# azurerm_\|# google_" || echo "0")
-          RESOURCES_TO_CHANGE=$(echo "$PLAN_OUTPUT" | grep -c "~ module\|~ aws_\|~ azurerm_\|~ google_" || echo "0")
-          RESOURCES_TO_DESTROY=$(echo "$PLAN_OUTPUT" | grep -c "-/+ module\|-/+ aws_\|-/+ azurerm_\|-/+ google_\|-" || echo "0")
+          
+          # 리소스 변경 계산 방식 개선
+          RESOURCES_TO_ADD=$(echo "$PLAN_OUTPUT" | grep -E '^\s*\+\s' | wc -l)
+          RESOURCES_TO_CHANGE=$(echo "$PLAN_OUTPUT" | grep -E '^\s*~\s' | wc -l)
+          RESOURCES_TO_DESTROY=$(echo "$PLAN_OUTPUT" | grep -E '^\s*-\s' | wc -l)
           
           # 요약 추가
           echo "## Terraform Plan 결과" >> $GITHUB_STEP_SUMMARY
