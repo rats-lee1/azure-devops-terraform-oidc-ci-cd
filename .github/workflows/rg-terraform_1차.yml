@@ -17,8 +17,6 @@ jobs:
     if: github.event.label.name == 'resource_group' || contains(github.event.issue.labels.*.name, 'resource_group')
     outputs:
       resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
-      poc_name: ${{ steps.extract-poc-info.outputs.poc_name }}
-      has_poc: ${{ steps.extract-poc-info.outputs.has_poc }}
     steps:
       - name: Check for Resource Group Label
         id: check-label
@@ -122,171 +120,17 @@ jobs:
             
             console.log(`✅ Resource Group name: ${resourceGroup}`);
             core.setOutput('resource_group', resourceGroup);
-
-      - name: Extract POC from Labels
-        id: extract-poc-info
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            console.log(`이슈 #${context.payload.issue.number} POC 정보 추출 중`);
-            
-            try {
-              // 이슈 정보 가져오기
-              const issue = await github.rest.issues.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.issue.number
-              });
-              
-              // 이슈 라벨 확인
-              const labels = issue.data.labels || [];
-              console.log(`이슈에 총 ${labels.length}개의 라벨이 있습니다.`);
-              
-              // POC 라벨 찾기 (POC: 로 시작하는 라벨)
-              const pocLabels = labels.filter(label => {
-                const labelName = label.name || '';
-                return labelName.startsWith('POC:');
-              });
-              
-              console.log(`${pocLabels.length}개의 POC 라벨이 발견되었습니다.`);
-              
-              let hasPOC = false;
-              let pocName = '';
-              
-              if (pocLabels.length > 0) {
-                // POC 라벨 정보 추출
-                const pocInfo = pocLabels.map(label => {
-                  const labelName = label.name;
-                  const pocName = labelName.substring(4).trim(); // "POC:" 부분 제거
-                  return {
-                    fullLabel: labelName,
-                    pocName: pocName,
-                    color: label.color
-                  };
-                });
-                
-                console.log('발견된 POC 정보:', JSON.stringify(pocInfo, null, 2));
-                
-                // 이슈에 POC 정보 코멘트 추가
-                let comment = '### 이 이슈에 연결된 POC 정보:\n\n';
-                
-                pocInfo.forEach(poc => {
-                  comment += `- **${poc.pocName}** (라벨: \`${poc.fullLabel}\`)\n`;
-                });
-                
-                hasPOC = true;
-                pocName = pocInfo[0].pocName; // 첫 번째 POC 이름 사용
-                
-                // 기존 코멘트가 있는지 확인
-                const comments = await github.rest.issues.listComments({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.payload.issue.number
-                });
-                
-                // 같은 봇이 작성한 기존 POC 정보 코멘트 찾기
-                const botComments = comments.data.filter(comment => {
-                  return comment.user.type === 'Bot' && 
-                         comment.body.includes('이 이슈에 연결된 POC 정보:');
-                });
-                
-                if (botComments.length > 0) {
-                  // 기존 코멘트 업데이트
-                  await github.rest.issues.updateComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    comment_id: botComments[0].id,
-                    body: comment
-                  });
-                  console.log('기존 POC 정보 코멘트가 업데이트되었습니다.');
-                } else {
-                  // 새 코멘트 작성
-                  await github.rest.issues.createComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: context.payload.issue.number,
-                    body: comment
-                  });
-                  console.log('POC 정보 코멘트가 추가되었습니다.');
-                }
-              } else {
-                console.log('이 이슈에는 POC 라벨이 없습니다.');
-                hasPOC = false;
-                
-                // POC가 없다는 코멘트 추가
-                const noPocComment = '### ⚠️ 프로젝트 정보 누락\n\n이 이슈에 POC 정보가 없습니다. 적절한 POC 라벨(`POC:이름`)을 추가해주세요.';
-                
-                // 기존 코멘트가 있는지 확인
-                const comments = await github.rest.issues.listComments({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.payload.issue.number
-                });
-                
-                // 기존 POC 정보 코멘트 찾기
-                const pocComments = comments.data.filter(comment => {
-                  return comment.user.type === 'Bot' && 
-                         (comment.body.includes('이 이슈에 연결된 POC 정보:') || 
-                          comment.body.includes('⚠️ 프로젝트 정보 누락'));
-                });
-                
-                if (pocComments.length > 0) {
-                  // 기존 코멘트 업데이트
-                  await github.rest.issues.updateComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    comment_id: pocComments[0].id,
-                    body: noPocComment
-                  });
-                  console.log('기존 코멘트가 POC 누락 메시지로 업데이트되었습니다.');
-                } else {
-                  // 새 코멘트 작성
-                  await github.rest.issues.createComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: context.payload.issue.number,
-                    body: noPocComment
-                  });
-                  console.log('POC 정보 누락 코멘트가 추가되었습니다.');
-                }
-              }
-              
-              // 출력 설정
-              core.setOutput('has_poc', hasPOC.toString());
-              core.setOutput('poc_name', pocName);
-              
-            } catch (error) {
-              console.error('POC 정보 추출 중 오류 발생:', error.message);
-              core.setOutput('has_poc', 'false');
-              core.setOutput('poc_name', '');
-              
-              // 오류 정보를 이슈에 코멘트로 추가
-              try {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.payload.issue.number,
-                  body: `### ❌ POC 라벨 추출 중 오류 발생\n\n\`\`\`\n${error.message}\n\`\`\``
-                });
-              } catch (commentError) {
-                console.error('코멘트 추가 중 추가 오류 발생:', commentError.message);
-              }
-            }
       
       - name: Add Resource Group Summary
         run: |
-          echo "## 리소스 그룹 및 POC 검증 결과" >> $GITHUB_STEP_SUMMARY
+          echo "## 리소스 그룹 검증 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 이슈 번호: #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
           echo "- 식별된 리소스 그룹: **${{ steps.get-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- POC 정보: **${{ steps.extract-poc-info.outputs.has_poc == 'true' && steps.extract-poc-info.outputs.poc_name || '없음' }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 검증 완료" >> $GITHUB_STEP_SUMMARY
 
   terraform-plan:
     needs: pre-checking
     runs-on: ubuntu-latest
-    # POC 정보가 있는 경우에만 진행
-    if: needs.pre-checking.outputs.has_poc == 'true'
     
     env:
       ARM_USE_OIDC: true
@@ -359,7 +203,6 @@ jobs:
           # 요약 추가
           echo "## Terraform Plan 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
-          echo "- POC: **${{ needs.pre-checking.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ Plan 완료" >> $GITHUB_STEP_SUMMARY
       
       - name: Upload Terraform Plan
@@ -382,45 +225,13 @@ jobs:
               body: `## Terraform Plan 완료 ✅
               
               리소스 그룹: \`${{ needs.pre-checking.outputs.resource_group }}\`
-              POC: \`${{ needs.pre-checking.outputs.poc_name }}\`
               
               Plan이 완료되었습니다. 팀장님의 승인 후 Apply가 진행됩니다.`
             });
 
-  handle-missing-poc:
-    needs: pre-checking
-    if: needs.pre-checking.outputs.has_poc == 'false'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Update Summary for Missing POC
-        run: |
-          echo "## 작업 중단 - POC 정보 누락" >> $GITHUB_STEP_SUMMARY
-          echo "- 리소스 그룹: **${{ needs.pre-checking.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- 상태: ❌ POC 정보가 누락되어 배포가 중단되었습니다" >> $GITHUB_STEP_SUMMARY
-          echo "- 조치: POC 라벨을 추가한 후 다시 시도해주세요." >> $GITHUB_STEP_SUMMARY
-
-      - name: Remove Resource Group Label
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            try {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.issue.number,
-                name: 'resource_group'
-              });
-              console.log('resource_group 라벨이 제거되었습니다.');
-            } catch (e) {
-              console.log('라벨 제거 중 오류 발생:', e.message);
-            }
-
   terraform-apply:
     needs: [pre-checking, terraform-plan]
     runs-on: ubuntu-latest
-    # POC 정보가 있는 경우에만 진행
-    if: needs.pre-checking.outputs.has_poc == 'true'
     environment: 
       name: production
       url: ${{ github.server_url }}/${{ github.repository }}/issues/${{ github.event.issue.number }}
@@ -481,7 +292,6 @@ jobs:
           # 요약 시작
           echo "## Terraform Apply 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
-          echo "- POC: **${{ needs.pre-checking.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 성공적으로 배포됨" >> $GITHUB_STEP_SUMMARY
           
           # 리소스 목록 출력 (선택적)
@@ -503,9 +313,7 @@ jobs:
               issue_number: issue_number,
               body: `## Terraform Apply 완료 ✅
               
-              리소스 그룹: \`${{ needs.pre-checking.outputs.resource_group }}\`
-              POC: \`${{ needs.pre-checking.outputs.poc_name }}\`
-              
+              리소스 그룹: \`${{ needs.pre-checking.outputs.resource_group }}\` 
               인프라 배포가 완료되었습니다.`
             });
 
@@ -517,15 +325,13 @@ jobs:
       (needs.terraform-apply.result == 'failure' || 
        needs.terraform-apply.result == 'cancelled' || 
        needs.terraform-apply.result == 'skipped') && 
-      needs.terraform-apply.outputs.started != 'true' &&
-      needs.pre-checking.outputs.has_poc == 'true'
+      needs.terraform-apply.outputs.started != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Update Summary for Rejection
         run: |
           echo "## 배포 거절 정보" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${{ needs.pre-checking.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- POC: **${{ needs.pre-checking.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ❌ 배포 요청이 거절되었습니다" >> $GITHUB_STEP_SUMMARY
           echo "- 조치: 이슈에 거절 코멘트가 추가되었습니다" >> $GITHUB_STEP_SUMMARY
 
@@ -562,7 +368,7 @@ jobs:
             });
 
   cleanup-artifacts:
-    needs: [terraform-plan, handle-rejection, handle-missing-poc]
+    needs: [terraform-plan, handle-rejection]
     if: always()
     runs-on: ubuntu-latest
 

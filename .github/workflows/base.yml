@@ -1,0 +1,20 @@
+name: base workflow
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+
+jobs:
+  reusable_workflow_job:
+    name: base_echo
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - run: |
+          echo ${{ inputs.environment }}
+          echo ${{ secrets.TEST }}
+          echo ${{ vars.VAR1 }}
+          echo '### Hello world! 🚀' >> $GITHUB_STEP_SUMMARY
