@@ -34,7 +34,7 @@ jobs:
         with:
           script: |
             const issue = context.payload.issue;
-            const pocLabel = issue.labels.find(label => label.name.startsWith('poc:'));
+            const pocLabel = issue.labels.find(label => label.name.startsWith('POC:'));
             if (!pocLabel) {
               core.setFailed('이슈에서 POC 라벨을 찾을 수 없습니다.');
               return;
