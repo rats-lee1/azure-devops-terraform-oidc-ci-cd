@@ -48,7 +48,7 @@ jobs:
           
           echo "✅ Resource Group label detected."
       
-      - name: Check for Project Field in Issue
+      - name: Check if Issue is in GitHub Project
         id: check-project
         uses: actions/github-script@v6
         with:
@@ -57,82 +57,79 @@ jobs:
             const issue_number = context.payload.issue.number;
             const repo = context.repo;
             
-            // 이슈 상세 정보 가져오기
-            const issue = await github.rest.issues.get({
-              owner: repo.owner,
-              repo: repo.repo,
-              issue_number: issue_number
-            });
+            console.log(`Checking if issue #${issue_number} is linked to a GitHub Project...`);
             
-            let projectName = null;
-            const issueBody = issue.data.body;
-            let hasProject = false;
-            
-            // Issue Forms에서 프로젝트 필드 찾기
-            if (issueBody) {
-              // 프로젝트명 패턴 검색 (다양한 형식 지원)
-              const possibleProjectPatterns = [
-                /###\s+프로젝트명\s*([\s\S]*?)(?=###|$)/,
-                /###\s+프로젝트\s+이름\s*([\s\S]*?)(?=###|$)/,
-                /###\s+Project\s+Name\s*([\s\S]*?)(?=###|$)/,
-                /프로젝트명:?\s*([^\n]+)/i,
-                /프로젝트\s+이름:?\s*([^\n]+)/i,
-                /project\s+name:?\s*([^\n]+)/i
-              ];
-              
-              for (const pattern of possibleProjectPatterns) {
-                const match = issueBody.match(pattern);
-                if (match && match[1]) {
-                  projectName = match[1].trim();
-                  hasProject = true;
-                  break;
+            // 이슈가 프로젝트에 연결되어 있는지 확인 (GraphQL API 사용)
+            const query = `
+              query($owner: String!, $repo: String!, $issueNumber: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $issueNumber) {
+                    projectItems(first: 10) {
+                      nodes {
+                        project {
+                          id
+                          title
+                          number
+                        }
+                      }
+                    }
+                  }
                 }
               }
-            }
+            `;
             
-            console.log(`Project check result: ${hasProject ? '✅ Found project: ' + projectName : '❌ No project found'}`);
-            
-            // 결과 출력
-            core.setOutput('has_project', hasProject.toString());
-            if (projectName) {
-              core.setOutput('project_name', projectName);
-            }
-            
-            // 요약에 추가
-            if (!hasProject) {
-              await github.rest.issues.createComment({
+            try {
+              const result = await github.graphql(query, {
                 owner: repo.owner,
                 repo: repo.repo,
-                issue_number: issue_number,
-                body: `## ❌ 프로젝트 정보 누락
-                
-                이 이슈에 **프로젝트명**이 지정되지 않았습니다.
-                
-                이슈를 수정하여 프로젝트명을 추가한 후 'resource_group' 라벨을 다시 달아주세요.
-                
-                예시 형식:
-                ```
-                ### 프로젝트명
-                프로젝트명을 입력해주세요
-                ```
-                `
+                issueNumber: issue_number
               });
               
-              // 리소스 그룹 라벨 제거
-              try {
-                await github.rest.issues.removeLabel({
+              const projectItems = result.repository.issue.projectItems.nodes;
+              const hasProject = projectItems.length > 0;
+              let projectName = null;
+              
+              if (hasProject) {
+                projectName = projectItems[0].project.title;
+                console.log(`✅ Issue is linked to GitHub Project: "${projectName}" (Project #${projectItems[0].project.number})`);
+                
+                // 프로젝트 정보 출력
+                core.setOutput('has_project', 'true');
+                core.setOutput('project_name', projectName);
+                core.setOutput('project_number', projectItems[0].project.number.toString());
+              } else {
+                console.log('❌ Issue is not linked to any GitHub Project');
+                
+                // 프로젝트 없음 출력
+                core.setOutput('has_project', 'false');
+                
+                // 이슈에 댓글 추가
+                await github.rest.issues.createComment({
                   owner: repo.owner,
                   repo: repo.repo,
                   issue_number: issue_number,
-                  name: 'resource_group'
+                  body: "## ❌ GitHub Project 연결 필요\n\n이 이슈가 GitHub Project에 연결되어 있지 않습니다.\n\n1. 이슈 오른쪽 사이드바에서 'Projects'를 찾아 관련 프로젝트에 연결해주세요.\n2. 프로젝트 연결 후 'resource_group' 라벨을 다시 달아주세요."
                 });
-                console.log("✅ Removed resource_group label due to missing project");
-              } catch (error) {
-                console.log("Warning: Failed to remove resource_group label");
+                
+                // 리소스 그룹 라벨 제거
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner: repo.owner,
+                    repo: repo.repo,
+                    issue_number: issue_number,
+                    name: 'resource_group'
+                  });
+                  console.log("✅ Removed resource_group label due to missing project link");
+                } catch (error) {
+                  console.log("Warning: Failed to remove resource_group label");
+                }
+                
+                // 에러 발생 (다음 작업 중단)
+                core.setFailed('이슈가 GitHub Project에 연결되어 있지 않습니다.');
               }
-              
-              // 에러 발생 (다음 작업 중단)
-              core.setFailed('프로젝트 정보가 누락되었습니다.');
+            } catch (error) {
+              console.error('Error checking project links:', error.message);
+              core.setFailed(`GitHub Project 확인 중 오류 발생: ${error.message}`);
             }
 
       - name: Extract Resource Group from Issue (Issue Forms)
@@ -216,7 +213,7 @@ jobs:
         run: |
           echo "## 리소스 그룹 검증 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 이슈 번호: #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "- 프로젝트명: **${{ steps.check-project.outputs.project_name }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub Project: **${{ steps.check-project.outputs.project_name }}** (#${{ steps.check-project.outputs.project_number }})" >> $GITHUB_STEP_SUMMARY
           echo "- 식별된 리소스 그룹: **${{ steps.get-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 검증 완료" >> $GITHUB_STEP_SUMMARY
 
@@ -296,7 +293,7 @@ jobs:
           
           # 요약 추가
           echo "## Terraform Plan 결과" >> $GITHUB_STEP_SUMMARY
-          echo "- 프로젝트명: **${TF_VAR_project_name}**" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub Project: **${TF_VAR_project_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ Plan 완료" >> $GITHUB_STEP_SUMMARY
       
@@ -319,7 +316,7 @@ jobs:
               issue_number: issue_number,
               body: `## Terraform Plan 완료 ✅
               
-              프로젝트명: \`${{ needs.check-label-and-extract-resource-group.outputs.project_name }}\`
+              GitHub Project: \`${{ needs.check-label-and-extract-resource-group.outputs.project_name }}\` (#${{ needs.check-label-and-extract-resource-group.outputs.project_number }})
               리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\`
               
               Plan이 완료되었습니다. 팀장님의 승인 후 Apply가 진행됩니다.`
@@ -389,7 +386,7 @@ jobs:
           
           # 요약 시작
           echo "## Terraform Apply 결과" >> $GITHUB_STEP_SUMMARY
-          echo "- 프로젝트명: **${TF_VAR_project_name}**" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub Project: **${TF_VAR_project_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 성공적으로 배포됨" >> $GITHUB_STEP_SUMMARY
           
@@ -412,7 +409,7 @@ jobs:
               issue_number: issue_number,
               body: `## Terraform Apply 완료 ✅
               
-              프로젝트명: \`${{ needs.check-label-and-extract-resource-group.outputs.project_name }}\`
+              GitHub Project: \`${{ needs.check-label-and-extract-resource-group.outputs.project_name }}\` (#${{ needs.check-label-and-extract-resource-group.outputs.project_number }})
               리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\` 
               
               인프라 배포가 완료되었습니다.`
