@@ -11,7 +11,7 @@ permissions:
   issues: write
 
 jobs:
-  pre-checking:
+pre-checking:
     runs-on: ubuntu-latest
 
     outputs:
@@ -70,6 +70,32 @@ jobs:
                     break;
                   }
                 }
+              }
+            }
+            
+            // 리소스 그룹명 검증
+            if (resourceGroup) {
+              // Azure 리소스 그룹 명명 규칙 검증
+              const validNamePattern = /^[a-zA-Z0-9\-_\.\(\)]+$/;
+              if (!validNamePattern.test(resourceGroup)) {
+                console.log(`❌ 유효하지 않은 리소스 그룹명: "${resourceGroup}"`);
+                console.log('리소스 그룹명은 영문자, 숫자, 대시(-), 밑줄(_), 괄호(), 마침표(.)만 포함할 수 있습니다.');
+                
+                // 오류를 이슈에 코멘트로 추가
+                try {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: context.payload.issue.number,
+                    body: `### ❌ 유효하지 않은 리소스 그룹명\n\n리소스 그룹명 \`${resourceGroup}\`은(는) Azure 명명 규칙에 맞지 않습니다.\n\n리소스 그룹명은 영문자, 숫자, 대시(-), 밑줄(_), 괄호(), 마침표(.)만 포함할 수 있습니다.\n\n유효한 리소스 그룹명으로 다시 시도해주세요.`
+                  });
+                  console.log('리소스 그룹명 오류 메시지가 이슈에 코멘트로 추가되었습니다.');
+                } catch (commentError) {
+                  console.error('코멘트 추가 중 오류 발생:', commentError.message);
+                }
+                
+                core.setFailed(`유효하지 않은 리소스 그룹명: ${resourceGroup}`);
+                return;
               }
             }
             
@@ -476,7 +502,9 @@ jobs:
 
   cleanup-artifacts:
     needs: [terraform-plan, handle-rejection]
-    if: always()
+    if: >
+      always() &&
+      needs.terraform-plan.result != 'skipped' 
     runs-on: ubuntu-latest
 
     # 🟢 아티팩트 삭제용 API 호출 권한
