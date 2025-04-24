@@ -17,8 +17,6 @@ jobs:
     if: github.event.label.name == 'resource_group' || contains(github.event.issue.labels.*.name, 'resource_group')
     outputs:
       resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
-      project_name: ${{ steps.check-project.outputs.project_name }}
-      has_project: ${{ steps.check-project.outputs.has_project }}
     steps:
       - name: Check for Resource Group Label
         id: check-label
@@ -48,75 +46,8 @@ jobs:
           
           echo "✅ Resource Group label detected."
       
-      - name: Check if Issue is in GitHub Project
-        id: check-project
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const issue_number = context.payload.issue.number;
-            const repo = context.repo;
-            
-            console.log(`Checking if issue #${issue_number} is linked to a GitHub Project...`);
-            
-            // 방법 1: REST API 사용 시도 (기본 권한으로 가능한 경우)
-            try {
-              // 이슈 상세 정보 가져오기 
-              const issue = await github.rest.issues.get({
-                owner: repo.owner,
-                repo: repo.repo,
-                issue_number: issue_number
-              });
-              
-              // 이미지에서 프로젝트가 연결되어 있는 것을 확인했으므로
-              // 일단 연결된 것으로 간주하고 진행하겠습니다.
-              console.log('✅ Assuming the issue is connected to a GitHub Project');
-              
-              // 프로젝트 정보 설정 - 실제 값을 가져오는 대신 기본값 사용
-              core.setOutput('has_project', 'true');
-              core.setOutput('project_name', '메타즈챌지 POC'); // 이미지에서 본 프로젝트명
-              core.setOutput('project_number', '1');  // 기본값 설정
-              
-              return;
-            } catch (error) {
-              console.log(`REST API method failed: ${error.message}`);
-              // 실패해도 계속 진행 (다음 방법 시도)
-            }
-            
-            // 방법 2: 항상 성공으로 처리 (디버깅 목적)
-            // 실제 환경에서는 프로젝트 연결 여부를 확인하는 로직으로 대체해야 합니다
-            console.log('⚠️ Using fallback method - assuming project is connected');
-            core.setOutput('has_project', 'true');
-            core.setOutput('project_name', '메타즈챌지 POC');
-            core.setOutput('project_number', '1');
-            
-            // 참고: 실제 환경에서는 아래 코드를 사용하지 않습니다
-            // 아래는 프로젝트 연결이 실제로 없을 때 실행될 코드입니다
-            /* 
-            if (false) {  // 항상 실행되지 않음
-              await github.rest.issues.createComment({
-                owner: repo.owner,
-                repo: repo.repo,
-                issue_number: issue_number,
-                body: "## ❌ GitHub Project 연결 필요\n\n이 이슈가 GitHub Project에 연결되어 있지 않습니다.\n\n1. 이슈 오른쪽 사이드바에서 'Projects'를 찾아 관련 프로젝트에 연결해주세요.\n2. 프로젝트 연결 후 'resource_group' 라벨을 다시 달아주세요."
-              });
-              
-              try {
-                await github.rest.issues.removeLabel({
-                  owner: repo.owner,
-                  repo: repo.repo,
-                  issue_number: issue_number,
-                  name: 'resource_group'
-                });
-              } catch (e) {}
-              
-              core.setFailed('이슈가 GitHub Project에 연결되어 있지 않습니다.');
-            }
-            */
-
       - name: Extract Resource Group from Issue (Issue Forms)
         id: get-resource-group
-        if: steps.check-project.outputs.has_project == 'true'
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -191,17 +122,14 @@ jobs:
             core.setOutput('resource_group', resourceGroup);
       
       - name: Add Resource Group Summary
-        if: steps.check-project.outputs.has_project == 'true'
         run: |
           echo "## 리소스 그룹 검증 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 이슈 번호: #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "- GitHub Project: **${{ steps.check-project.outputs.project_name }}** (#${{ steps.check-project.outputs.project_number }})" >> $GITHUB_STEP_SUMMARY
           echo "- 식별된 리소스 그룹: **${{ steps.get-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 검증 완료" >> $GITHUB_STEP_SUMMARY
 
   terraform-plan:
     needs: check-label-and-extract-resource-group
-    if: needs.check-label-and-extract-resource-group.outputs.has_project == 'true'
     runs-on: ubuntu-latest
     
     env:
@@ -210,7 +138,6 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_resource_group_name: ${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}
-      TF_VAR_project_name: ${{ needs.check-label-and-extract-resource-group.outputs.project_name }}
     
     steps:
       - uses: actions/checkout@v3
@@ -263,7 +190,7 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan -var="resource_group_name=${TF_VAR_resource_group_name}" -var="project_name=${TF_VAR_project_name}" -out=tfplan
+          terraform plan -var="resource_group_name=${TF_VAR_resource_group_name}" -out=tfplan
           
           # Plan 상태 캡처 (개선된 방식)
           PLAN_OUTPUT=$(terraform show -no-color tfplan)
@@ -275,11 +202,7 @@ jobs:
           
           # 요약 추가
           echo "## Terraform Plan 결과" >> $GITHUB_STEP_SUMMARY
-          echo "- GitHub Project: **${TF_VAR_project_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
-          echo "- 추가될 리소스: **${RESOURCES_TO_ADD}**개" >> $GITHUB_STEP_SUMMARY
-          echo "- 변경될 리소스: **${RESOURCES_TO_CHANGE}**개" >> $GITHUB_STEP_SUMMARY
-          echo "- 삭제될 리소스: **${RESOURCES_TO_DESTROY}**개" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ Plan 완료" >> $GITHUB_STEP_SUMMARY
       
       - name: Upload Terraform Plan
@@ -301,7 +224,6 @@ jobs:
               issue_number: issue_number,
               body: `## Terraform Plan 완료 ✅
               
-              GitHub Project: \`${{ needs.check-label-and-extract-resource-group.outputs.project_name }}\` (#${{ needs.check-label-and-extract-resource-group.outputs.project_number }})
               리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\`
               
               Plan이 완료되었습니다. 팀장님의 승인 후 Apply가 진행됩니다.`
@@ -309,7 +231,6 @@ jobs:
 
   terraform-apply:
     needs: [check-label-and-extract-resource-group, terraform-plan]
-    if: needs.check-label-and-extract-resource-group.outputs.has_project == 'true'
     runs-on: ubuntu-latest
     environment: 
       name: production
@@ -324,7 +245,6 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_resource_group_name: ${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}
-      TF_VAR_project_name: ${{ needs.check-label-and-extract-resource-group.outputs.project_name }}
     
     steps:
       - name: Get Approval Status
@@ -371,7 +291,6 @@ jobs:
           
           # 요약 시작
           echo "## Terraform Apply 결과" >> $GITHUB_STEP_SUMMARY
-          echo "- GitHub Project: **${TF_VAR_project_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 성공적으로 배포됨" >> $GITHUB_STEP_SUMMARY
           
@@ -394,9 +313,7 @@ jobs:
               issue_number: issue_number,
               body: `## Terraform Apply 완료 ✅
               
-              GitHub Project: \`${{ needs.check-label-and-extract-resource-group.outputs.project_name }}\` (#${{ needs.check-label-and-extract-resource-group.outputs.project_number }})
               리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\` 
-              
               인프라 배포가 완료되었습니다.`
             });
 
