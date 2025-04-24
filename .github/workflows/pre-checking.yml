@@ -1,4 +1,4 @@
-name: Resource Group Checking
+name: 'Resource Group Pre-checking'
 
 on:
   workflow_call:
@@ -9,17 +9,14 @@ on:
         description: '이슈 번호'
     outputs:
       resource_group:
-        description: '추출된 리소스 그룹명'
+        description: '추출된 리소스 그룹 이름'
         value: ${{ jobs.pre-checking.outputs.resource_group }}
       poc_name:
         description: '추출된 POC 이름'
         value: ${{ jobs.pre-checking.outputs.poc_name }}
       has_poc:
-        description: 'POC가 있는지 여부'
+        description: 'POC 정보 존재 여부'
         value: ${{ jobs.pre-checking.outputs.has_poc }}
-      rg_exists:
-        description: '리소스 그룹이 이미 존재하는지 여부'
-        value: ${{ jobs.pre-checking.outputs.rg_exists }}
 
 jobs:
   pre-checking:
@@ -29,7 +26,7 @@ jobs:
       resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
       poc_name: ${{ steps.extract-poc-info.outputs.poc_name }}
       has_poc: ${{ steps.extract-poc-info.outputs.has_poc }}
-      rg_exists: ${{ steps.check-rg-exists.outputs.RG_EXISTS || 'false' }}
+    
     steps:
       - name: Extract Resource Group from Issue (Issue Forms)
         id: get-resource-group
@@ -37,6 +34,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            // workflow_call에서 전달받은 issue_number 사용
             const issue_number = ${{ inputs.issue_number }};
             const repo = context.repo;
             
@@ -124,14 +122,16 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            console.log(`이슈 #${inputs.issue_number} POC 정보 추출 중`);
+            // workflow_call에서 전달받은 issue_number 사용
+            const issue_number = ${{ inputs.issue_number }};
+            console.log(`이슈 #${issue_number} POC 정보 추출 중`);
             
             try {
               // 이슈 정보 가져오기
               const issue = await github.rest.issues.get({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: ${{ inputs.issue_number }}
+                issue_number: issue_number
               });
               
               // 이슈 라벨 확인
@@ -175,7 +175,7 @@ jobs:
                   const comments = await github.rest.issues.listComments({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
-                    issue_number: ${{ inputs.issue_number }}
+                    issue_number: issue_number
                   });
                   
                   // 같은 경고 메시지를 이미 달았는지 확인
@@ -194,7 +194,7 @@ jobs:
                     await github.rest.issues.createComment({
                       owner: context.repo.owner,
                       repo: context.repo.repo,
-                      issue_number: ${{ inputs.issue_number }},
+                      issue_number: issue_number,
                       body: warningMessage
                     });
                     console.log('POC 정보 누락 경고 메시지가 추가되었습니다.');
@@ -218,7 +218,7 @@ jobs:
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  issue_number: ${{ inputs.issue_number }},
+                  issue_number: issue_number,
                   body: `### ❌ POC 라벨 추출 중 오류 발생\n\n\`\`\`\n${error.message}\n\`\`\``
                 });
                 console.log('오류 정보가 이슈에 코멘트로 추가되었습니다.');
@@ -227,101 +227,10 @@ jobs:
               }
             }
       
-      - name: Check if Resource Group Already Exists
-        id: check-rg-exists
-        if: success() && steps.get-resource-group.outputs.resource_group != ''
-        uses: azure/CLI@v1
-        with:
-          azcliversion: latest
-          inlineScript: |
-            #!/bin/bash
-            RG_NAME="${{ steps.get-resource-group.outputs.resource_group }}"
-            echo "확인할 리소스 그룹명: $RG_NAME"
-            
-            # 리소스 그룹 존재 여부 확인
-            RG_EXISTS=$(az group exists --name "$RG_NAME")
-            
-            if [ "$RG_EXISTS" = "true" ]; then
-              echo "::warning::리소스 그룹 '$RG_NAME'이(가) 이미 존재합니다!"
-              echo "RG_EXISTS=true" >> $GITHUB_OUTPUT
-              
-              # 기존 리소스 그룹의 태그 정보 조회
-              TAGS=$(az group show --name "$RG_NAME" --query "tags" -o json)
-              CREATED_BY=$(echo $TAGS | jq -r '.CreatedBy // "알 수 없음"')
-              PROJECT=$(echo $TAGS | jq -r '.Project // "알 수 없음"')
-              CREATED_DATE=$(echo $TAGS | jq -r '.CreatedDate // "알 수 없음"')
-              
-              echo "기존 리소스 그룹 정보:" >> $GITHUB_STEP_SUMMARY
-              echo "- 생성자: $CREATED_BY" >> $GITHUB_STEP_SUMMARY
-              echo "- 프로젝트: $PROJECT" >> $GITHUB_STEP_SUMMARY
-              echo "- 생성일: $CREATED_DATE" >> $GITHUB_STEP_SUMMARY
-              
-              # 출력값 설정
-              echo "TAGS=$TAGS" >> $GITHUB_OUTPUT
-            else
-              echo "리소스 그룹 '$RG_NAME'이(가) 존재하지 않습니다. 새로 생성 가능합니다."
-              echo "RG_EXISTS=false" >> $GITHUB_OUTPUT
-            fi
-      
-      - name: Add Comment if Resource Group Already Exists
-        id: add-comment-if-exists
-        if: success() && steps.check-rg-exists.outputs.RG_EXISTS == 'true'
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const issueNumber = ${{ inputs.issue_number }};
-            const rgName = '${{ steps.get-resource-group.outputs.resource_group }}';
-            let tagsJson = '${{ steps.check-rg-exists.outputs.TAGS }}';
-            
-            // 태그 정보 파싱
-            let tags = {};
-            try {
-              tags = JSON.parse(tagsJson);
-            } catch (e) {
-              console.error('태그 정보 파싱 중 오류:', e.message);
-              tags = {};
-            }
-            
-            const createdBy = tags.CreatedBy || '알 수 없음';
-            const project = tags.Project || '알 수 없음';
-            const createdDate = tags.CreatedDate || '알 수 없음';
-            
-            // 충돌 메시지 생성
-            const conflictMessage = `### ⚠️ 리소스 그룹 충돌 감지
-            
-            리소스 그룹 \`${rgName}\`이(가) 이미 Azure에 존재합니다.
-            
-            **기존 리소스 그룹 정보:**
-            - 생성자: ${createdBy}
-            - 프로젝트: ${project}
-            - 생성일: ${createdDate}
-            
-            다음 중 하나의 조치를 취해주세요:
-            1. 다른 리소스 그룹명을 사용하여 이슈를 다시 생성
-            2. 기존 리소스 그룹을 삭제 후 진행 (주의: 모든 연결된 리소스가 삭제됩니다)
-            3. 기존 리소스 그룹이 더 이상 필요하지 않다면 이 이슈를 계속 진행 (기존 리소스가 대체됩니다)
-            `;
-            
-            // 이슈에 댓글 추가
-            try {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                body: conflictMessage
-              });
-              console.log('리소스 그룹 충돌 메시지가 이슈에 댓글로 추가되었습니다.');
-            } catch (error) {
-              console.error('댓글 추가 중 오류 발생:', error.message);
-              core.warning(`이슈에 댓글을 추가하는 중 오류가 발생했습니다: ${error.message}`);
-            }
-
       - name: Add Resource Group Summary
         run: |
           echo "## 리소스 그룹 및 POC 검증 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 이슈 번호: #${{ inputs.issue_number }}" >> $GITHUB_STEP_SUMMARY
           echo "- 식별된 리소스 그룹: **${{ steps.get-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
           echo "- POC 정보: **${{ steps.extract-poc-info.outputs.has_poc == 'true' && steps.extract-poc-info.outputs.poc_name || '없음' }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- 리소스 그룹 존재 여부: **${{ steps.check-rg-exists.outputs.RG_EXISTS == 'true' && '존재함 ⚠️' || '존재하지 않음 ✅' }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 검증 완료" >> $GITHUB_STEP_SUMMARY
