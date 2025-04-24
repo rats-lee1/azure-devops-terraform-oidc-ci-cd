@@ -37,11 +37,6 @@ jobs:
       TF_VAR_resource_group_name: ${{ needs.pre-checking.outputs.resource_group }}
     
     steps:
-      - name: 디버그 출력
-        run: |
-          echo "has_poc 값: ${{ needs.pre-checking.outputs.has_poc }}"
-          echo "resource_group_exists 값: ${{ needs.pre-checking.outputs.resource_group_exists }}"
-          
       - uses: actions/checkout@v3
       
       - name: 'Check if secrets are set'
@@ -239,16 +234,25 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const issue_number = context.payload.issue.number;
+            const resourceGroupName = "${{ needs.pre-checking.outputs.resource_group }}";
+            const subscriptionId = "${{ secrets.AZURE_SUBSCRIPTION_ID }}";
+            
+            // Azure 포털 링크 생성
+            const portalLink = `https://portal.azure.com/#@/resource/subscriptions/${subscriptionId}/resourceGroups/${resourceGroupName}/overview`;
+            
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issue_number,
               body: `## Terraform Apply 완료 ✅
               
-              리소스 그룹: \`${{ needs.pre-checking.outputs.resource_group }}\`
+              리소스 그룹: \`${resourceGroupName}\`
               POC: \`${{ needs.pre-checking.outputs.poc_name }}\`
               
-              인프라 배포가 완료되었습니다.`
+              인프라 배포가 완료되었습니다.
+              
+              ### 리소스 그룹 접속
+              [Azure 포털에서 리소스 그룹 보기](${portalLink})`
             });
 
   handle-rejection:
