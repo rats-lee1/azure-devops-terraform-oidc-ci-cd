@@ -179,36 +179,18 @@ jobs:
                 console.log('이 이슈에는 POC 라벨이 없습니다.');
                 hasPOC = false;
                 
-                // POC가 없다는 경고 메시지를 이슈에 댓글로 추가
+                // POC가 없다는 경고 메시지를 이슈에 댓글로 추가 (중복 검사 없이)
                 try {
-                  // 기존 코멘트가 있는지 확인
-                  const comments = await github.rest.issues.listComments({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: issue_number
-                  });
-                  
-                  // 같은 경고 메시지를 이미 달았는지 확인
-                  const warningComment = comments.data.find(comment => 
-                    comment.body.includes('⚠️ 프로젝트 정보 누락') && 
-                    comment.user.type === 'Bot'
-                  );
-                  
                   const warningMessage = `### ⚠️ 프로젝트 정보 누락\n\n이 이슈에 POC 정보가 없습니다. 적절한 POC 라벨(\`POC:이름\`)을 추가해주세요.`;
                   
-                  if (warningComment) {
-                    // 이미 경고 댓글이 있으면 업데이트하지 않음
-                    console.log('이미 POC 누락 경고 메시지가 있습니다.');
-                  } else {
-                    // 새 경고 코멘트 작성
-                    await github.rest.issues.createComment({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      issue_number: issue_number,
-                      body: warningMessage
-                    });
-                    console.log('POC 정보 누락 경고 메시지가 추가되었습니다.');
-                  }
+                  // 새 경고 코멘트 작성 (중복 검사 제거)
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue_number,
+                    body: warningMessage
+                  });
+                  console.log('POC 정보 누락 경고 메시지가 추가되었습니다.');
                 } catch (commentError) {
                   console.error('경고 코멘트 추가 중 오류 발생:', commentError.message);
                 }
