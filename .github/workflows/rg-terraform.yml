@@ -5,6 +5,10 @@ on:
     types: [labeled]
   workflow_dispatch:
 
+concurrency:
+  group: issue-${{ github.event.issue.number }}
+  cancel-in-progress: true
+  
 permissions:
   id-token: write
   contents: read
