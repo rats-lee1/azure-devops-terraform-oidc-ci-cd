@@ -17,6 +17,8 @@ jobs:
     if: github.event.label.name == 'resource_group' || contains(github.event.issue.labels.*.name, 'resource_group')
     outputs:
       resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
+      project_name: ${{ steps.check-project.outputs.project_name }}
+      has_project: ${{ steps.check-project.outputs.has_project }}
     steps:
       - name: Check for Resource Group Label
         id: check-label
@@ -46,8 +48,96 @@ jobs:
           
           echo "✅ Resource Group label detected."
       
+      - name: Check for Project Field in Issue
+        id: check-project
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = context.payload.issue.number;
+            const repo = context.repo;
+            
+            // 이슈 상세 정보 가져오기
+            const issue = await github.rest.issues.get({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: issue_number
+            });
+            
+            let projectName = null;
+            const issueBody = issue.data.body;
+            let hasProject = false;
+            
+            // Issue Forms에서 프로젝트 필드 찾기
+            if (issueBody) {
+              // 프로젝트명 패턴 검색 (다양한 형식 지원)
+              const possibleProjectPatterns = [
+                /###\s+프로젝트명\s*([\s\S]*?)(?=###|$)/,
+                /###\s+프로젝트\s+이름\s*([\s\S]*?)(?=###|$)/,
+                /###\s+Project\s+Name\s*([\s\S]*?)(?=###|$)/,
+                /프로젝트명:?\s*([^\n]+)/i,
+                /프로젝트\s+이름:?\s*([^\n]+)/i,
+                /project\s+name:?\s*([^\n]+)/i
+              ];
+              
+              for (const pattern of possibleProjectPatterns) {
+                const match = issueBody.match(pattern);
+                if (match && match[1]) {
+                  projectName = match[1].trim();
+                  hasProject = true;
+                  break;
+                }
+              }
+            }
+            
+            console.log(`Project check result: ${hasProject ? '✅ Found project: ' + projectName : '❌ No project found'}`);
+            
+            // 결과 출력
+            core.setOutput('has_project', hasProject.toString());
+            if (projectName) {
+              core.setOutput('project_name', projectName);
+            }
+            
+            // 요약에 추가
+            if (!hasProject) {
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue_number,
+                body: `## ❌ 프로젝트 정보 누락
+                
+                이 이슈에 **프로젝트명**이 지정되지 않았습니다.
+                
+                이슈를 수정하여 프로젝트명을 추가한 후 'resource_group' 라벨을 다시 달아주세요.
+                
+                예시 형식:
+                ```
+                ### 프로젝트명
+                프로젝트명을 입력해주세요
+                ```
+                `
+              });
+              
+              // 리소스 그룹 라벨 제거
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  issue_number: issue_number,
+                  name: 'resource_group'
+                });
+                console.log("✅ Removed resource_group label due to missing project");
+              } catch (error) {
+                console.log("Warning: Failed to remove resource_group label");
+              }
+              
+              // 에러 발생 (다음 작업 중단)
+              core.setFailed('프로젝트 정보가 누락되었습니다.');
+            }
+
       - name: Extract Resource Group from Issue (Issue Forms)
         id: get-resource-group
+        if: steps.check-project.outputs.has_project == 'true'
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -122,14 +212,17 @@ jobs:
             core.setOutput('resource_group', resourceGroup);
       
       - name: Add Resource Group Summary
+        if: steps.check-project.outputs.has_project == 'true'
         run: |
           echo "## 리소스 그룹 검증 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 이슈 번호: #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 프로젝트명: **${{ steps.check-project.outputs.project_name }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 식별된 리소스 그룹: **${{ steps.get-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 검증 완료" >> $GITHUB_STEP_SUMMARY
 
   terraform-plan:
     needs: check-label-and-extract-resource-group
+    if: needs.check-label-and-extract-resource-group.outputs.has_project == 'true'
     runs-on: ubuntu-latest
     
     env:
@@ -138,6 +231,7 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_resource_group_name: ${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}
+      TF_VAR_project_name: ${{ needs.check-label-and-extract-resource-group.outputs.project_name }}
     
     steps:
       - uses: actions/checkout@v3
@@ -190,7 +284,7 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan -var="resource_group_name=${TF_VAR_resource_group_name}" -out=tfplan
+          terraform plan -var="resource_group_name=${TF_VAR_resource_group_name}" -var="project_name=${TF_VAR_project_name}" -out=tfplan
           
           # Plan 상태 캡처 (개선된 방식)
           PLAN_OUTPUT=$(terraform show -no-color tfplan)
@@ -202,6 +296,7 @@ jobs:
           
           # 요약 추가
           echo "## Terraform Plan 결과" >> $GITHUB_STEP_SUMMARY
+          echo "- 프로젝트명: **${TF_VAR_project_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ Plan 완료" >> $GITHUB_STEP_SUMMARY
       
@@ -224,6 +319,7 @@ jobs:
               issue_number: issue_number,
               body: `## Terraform Plan 완료 ✅
               
+              프로젝트명: \`${{ needs.check-label-and-extract-resource-group.outputs.project_name }}\`
               리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\`
               
               Plan이 완료되었습니다. 팀장님의 승인 후 Apply가 진행됩니다.`
@@ -231,6 +327,7 @@ jobs:
 
   terraform-apply:
     needs: [check-label-and-extract-resource-group, terraform-plan]
+    if: needs.check-label-and-extract-resource-group.outputs.has_project == 'true'
     runs-on: ubuntu-latest
     environment: 
       name: production
@@ -245,6 +342,7 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_resource_group_name: ${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}
+      TF_VAR_project_name: ${{ needs.check-label-and-extract-resource-group.outputs.project_name }}
     
     steps:
       - name: Get Approval Status
@@ -291,6 +389,7 @@ jobs:
           
           # 요약 시작
           echo "## Terraform Apply 결과" >> $GITHUB_STEP_SUMMARY
+          echo "- 프로젝트명: **${TF_VAR_project_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 성공적으로 배포됨" >> $GITHUB_STEP_SUMMARY
           
@@ -313,7 +412,9 @@ jobs:
               issue_number: issue_number,
               body: `## Terraform Apply 완료 ✅
               
+              프로젝트명: \`${{ needs.check-label-and-extract-resource-group.outputs.project_name }}\`
               리소스 그룹: \`${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}\` 
+              
               인프라 배포가 완료되었습니다.`
             });
 
