@@ -120,6 +120,13 @@ jobs:
             
             console.log(`✅ Resource Group name: ${resourceGroup}`);
             core.setOutput('resource_group', resourceGroup);
+      
+      - name: Add Resource Group Summary
+        run: |
+          echo "## 리소스 그룹 검증 결과" >> $GITHUB_STEP_SUMMARY
+          echo "- 이슈 번호: #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 식별된 리소스 그룹: **${{ steps.get-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ✅ 검증 완료" >> $GITHUB_STEP_SUMMARY
 
   terraform-plan:
     needs: check-label-and-extract-resource-group
@@ -136,22 +143,34 @@ jobs:
       - uses: actions/checkout@v3
       
       - name: 'Check if secrets are set'
+        id: check-secrets
         run: |
+          SECRETS_STATUS="✅ 모든 Azure 시크릿이 설정되었습니다."
+          
           if [ -z "${{ secrets.AZURE_CLIENT_ID }}" ]; then
             echo "❌ AZURE_CLIENT_ID is missing"
+            SECRETS_STATUS="❌ AZURE_CLIENT_ID가 누락되었습니다."
             exit 1
           fi
           if [ -z "${{ secrets.AZURE_TENANT_ID }}" ]; then
             echo "❌ AZURE_TENANT_ID is missing"
+            SECRETS_STATUS="❌ AZURE_TENANT_ID가 누락되었습니다."
             exit 1
           fi
           if [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ]; then
             echo "❌ AZURE_SUBSCRIPTION_ID is missing"
+            SECRETS_STATUS="❌ AZURE_SUBSCRIPTION_ID가 누락되었습니다."
             exit 1
           fi
           echo "✅ All secrets are set"
+          echo "secrets_status=$SECRETS_STATUS" >> $GITHUB_OUTPUT
+          
+          # 요약 추가
+          echo "## Azure 시크릿 확인" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: $SECRETS_STATUS" >> $GITHUB_STEP_SUMMARY
       
       - name: 'Az CLI login with OIDC'
+        id: azure-login
         uses: azure/login@v1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -162,11 +181,30 @@ jobs:
         uses: hashicorp/setup-terraform@v2
       
       - name: Terraform Init
-        run: terraform init
+        id: tf-init
+        run: |
+          terraform init
+          echo "## Terraform 초기화" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ✅ 초기화 완료" >> $GITHUB_STEP_SUMMARY
       
       - name: Terraform Plan
         id: plan
-        run: terraform plan -var="resource_group_name=${TF_VAR_resource_group_name}" -out=tfplan
+        run: |
+          terraform plan -var="resource_group_name=${TF_VAR_resource_group_name}" -out=tfplan
+          
+          # Plan 상태 캡처
+          PLAN_OUTPUT=$(terraform show -no-color tfplan)
+          RESOURCES_TO_ADD=$(echo "$PLAN_OUTPUT" | grep -c "# module\|# aws_\|# azurerm_\|# google_" || echo "0")
+          RESOURCES_TO_CHANGE=$(echo "$PLAN_OUTPUT" | grep -c "~ module\|~ aws_\|~ azurerm_\|~ google_" || echo "0")
+          RESOURCES_TO_DESTROY=$(echo "$PLAN_OUTPUT" | grep -c "-/+ module\|-/+ aws_\|-/+ azurerm_\|-/+ google_\|-" || echo "0")
+          
+          # 요약 추가
+          echo "## Terraform Plan 결과" >> $GITHUB_STEP_SUMMARY
+          echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 추가될 리소스: **${RESOURCES_TO_ADD}**개" >> $GITHUB_STEP_SUMMARY
+          echo "- 변경될 리소스: **${RESOURCES_TO_CHANGE}**개" >> $GITHUB_STEP_SUMMARY
+          echo "- 삭제될 리소스: **${RESOURCES_TO_DESTROY}**개" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ✅ Plan 완료" >> $GITHUB_STEP_SUMMARY
       
       - name: Upload Terraform Plan
         uses: actions/upload-artifact@v4
@@ -217,6 +255,11 @@ jobs:
           # GitHub Actions에서는 이 값을 직접 얻을 수 없으므로, 그냥 성공했다고 가정
           # 실제로는 워크플로우가 여기까지 진행되면 승인된 것임
           echo "status=approved" >> $GITHUB_OUTPUT
+          
+          # 요약 추가
+          echo "## 승인 정보" >> $GITHUB_STEP_SUMMARY
+          echo "- 환경: **production**" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ✅ 승인됨" >> $GITHUB_STEP_SUMMARY
 
       - name: Mark job started
         id: mark-start
@@ -243,7 +286,20 @@ jobs:
         run: terraform init
       
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        id: apply
+        run: |
+          terraform apply -auto-approve tfplan
+          
+          # 요약 시작
+          echo "## Terraform Apply 결과" >> $GITHUB_STEP_SUMMARY
+          echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ✅ 성공적으로 배포됨" >> $GITHUB_STEP_SUMMARY
+          
+          # 리소스 목록 출력 (선택적)
+          echo "### 배포된 리소스" >> $GITHUB_STEP_SUMMARY
+          terraform state list | while read -r resource; do
+            echo "- \`$resource\`" >> $GITHUB_STEP_SUMMARY
+          done
       
       - name: Post Apply Result to Issue
         if: ${{ success() }}
@@ -273,6 +329,13 @@ jobs:
       needs.terraform-apply.outputs.started != 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Update Summary for Rejection
+        run: |
+          echo "## 배포 거절 정보" >> $GITHUB_STEP_SUMMARY
+          echo "- 리소스 그룹: **${{ needs.check-label-and-extract-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ❌ 배포 요청이 거절되었습니다" >> $GITHUB_STEP_SUMMARY
+          echo "- 조치: 이슈에 거절 코멘트가 추가되었습니다" >> $GITHUB_STEP_SUMMARY
+
       - uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -315,6 +378,12 @@ jobs:
       actions: write
 
     steps:
+      - name: Update Summary for Cleanup
+        run: |
+          echo "## 아티팩트 정리" >> $GITHUB_STEP_SUMMARY
+          echo "- 작업: terraform-plan 아티팩트 정리" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: 진행 중..." >> $GITHUB_STEP_SUMMARY
+
       - name: List available artifacts
         uses: actions/github-script@v6
         with:
@@ -332,6 +401,7 @@ jobs:
             }
             
       - name: Delete terraform-plan artifact
+        id: delete-artifact
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -346,6 +416,8 @@ jobs:
               return artifact.name === "terraform-plan"
             })[0];
             
+            let deleteStatus = "❌ 아티팩트를 찾을 수 없음";
+            
             if (matchArtifact) {
               await github.rest.actions.deleteArtifact({
                 owner: context.repo.owner,
@@ -353,6 +425,17 @@ jobs:
                 artifact_id: matchArtifact.id
               });
               console.log(`Successfully deleted artifact: terraform-plan (ID: ${matchArtifact.id})`);
+              deleteStatus = "✅ 성공적으로 삭제됨";
             } else {
               console.log('No terraform-plan artifact found');
             }
+            
+            // 요약 업데이트
+            const fs = require('fs');
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- terraform-plan: **${deleteStatus}**\n`);
+            
+      - name: Final Workflow Summary
+        run: |
+          echo "## 워크플로우 완료" >> $GITHUB_STEP_SUMMARY
+          echo "- 전체 상태: ✅ 워크플로우 완료" >> $GITHUB_STEP_SUMMARY
+          echo "- 실행 시간: $(date)" >> $GITHUB_STEP_SUMMARY
