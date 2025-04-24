@@ -1,4 +1,4 @@
-name: Issue Project Parser (Debug)
+name: Issue Project Parser (GitHub CLI)
 
 on:
   issues:
@@ -15,110 +15,66 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Debug Issue Event
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            console.log('이슈 이벤트 디버깅:');
-            console.log('이슈 번호:', context.payload.issue.number);
-            console.log('저장소:', context.repo.owner + '/' + context.repo.repo);
+      - name: Setup GitHub CLI
+        run: |
+          # GitHub CLI는 Ubuntu 러너에 이미 설치되어 있습니다
+          gh --version
+        
+      - name: Get projects and add comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "이슈 #${ISSUE_NUMBER} 처리 중 (${REPO})"
+          
+          # GitHub CLI를 사용하여 이슈 정보 가져오기
+          ISSUE_INFO=$(gh issue view ${ISSUE_NUMBER} --repo ${REPO} --json title,body,projectItems)
+          
+          echo "이슈 정보 가져옴"
+          
+          # 프로젝트 정보 추출 (jq 사용)
+          PROJECTS=$(echo $ISSUE_INFO | jq -r '.projectItems')
+          PROJECTS_COUNT=$(echo $PROJECTS | jq 'length')
+          
+          echo "총 ${PROJECTS_COUNT}개의 프로젝트 정보 파싱됨"
+          
+          # 이슈에 프로젝트 정보 코멘트 추가
+          if [ "$PROJECTS_COUNT" -gt 0 ]; then
+            # 프로젝트 정보로 코멘트 생성
+            COMMENT="### 이 이슈와 연결된 프로젝트:\n\n"
             
-            try {
-              // REST API로 이슈 정보 가져오기
-              const issue = await github.rest.issues.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.issue.number
-              });
+            # 각 프로젝트 처리
+            echo $PROJECTS | jq -c '.[]' | while read -r project; do
+              PROJECT_TITLE=$(echo $project | jq -r '.title')
+              PROJECT_URL=$(echo $project | jq -r '.url')
               
-              console.log('이슈 제목:', issue.data.title);
-              console.log('이슈 상태:', issue.data.state);
+              COMMENT="${COMMENT}- [${PROJECT_TITLE}](${PROJECT_URL})\n"
               
-              // GitHub REST API는 Projects v2 정보를 직접 제공하지 않으므로 GraphQL을 사용
+              # 필드 정보 추출 (있는 경우)
+              FIELDS=$(echo $project | jq -r '.fields')
+              FIELDS_COUNT=$(echo $FIELDS | jq 'length')
               
-              // 먼저 이슈의 노드 ID 가져오기
-              const issueId = issue.data.node_id;
-              console.log('이슈 노드 ID:', issueId);
-              
-              // GraphQL을 사용하여 프로젝트 정보 가져오기
-              const query = `
-                query($issueId: ID!) {
-                  node(id: $issueId) {
-                    ... on Issue {
-                      title
-                      projectItems(first: 20) {
-                        nodes {
-                          project {
-                            title
-                            url
-                            id
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              `;
-              
-              const variables = {
-                issueId: issueId
-              };
-              
-              const result = await github.graphql(query, variables);
-              console.log('GraphQL 응답:', JSON.stringify(result, null, 2));
-              
-              // 프로젝트 정보 파싱
-              const projects = [];
-              
-              if (result.node && result.node.projectItems && result.node.projectItems.nodes) {
-                for (const item of result.node.projectItems.nodes) {
-                  if (item.project) {
-                    projects.push({
-                      name: item.project.title,
-                      url: item.project.url,
-                      id: item.project.id
-                    });
-                  }
-                }
-              }
-              
-              console.log(`총 ${projects.length}개의 프로젝트를 찾았습니다`);
-              
-              if (projects.length > 0) {
-                let comment = "### 이 이슈와 연결된 프로젝트:\n\n";
-                for (const project of projects) {
-                  comment += `- [${project.name}](${project.url})\n`;
-                }
+              if [ "$FIELDS_COUNT" -gt 0 ]; then
+                COMMENT="${COMMENT}  - 필드:\n"
                 
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.payload.issue.number,
-                  body: comment
-                });
-                
-                console.log("이슈에 프로젝트 정보 코멘트가 추가되었습니다");
-              } else {
-                console.log("이 이슈에 연결된 프로젝트가 없습니다");
-                
-                // 이슈에 코멘트 추가
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.payload.issue.number,
-                  body: "이 이슈와 연결된 프로젝트를 찾을 수 없습니다. GitHub API 접근 권한을 확인해 주세요."
-                });
-              }
-              
-            } catch (error) {
-              console.error('오류 발생:', error);
-              
-              // 오류 정보를 이슈에 코멘트로 추가
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.issue.number,
-                body: `### 오류 발생\n\n\`\`\`\n${error.message}\n\`\`\`\n\n권한 문제가 있을 수 있습니다. GitHub 토큰에 충분한 권한이 있는지 확인해 주세요.`
-              });
-            }
+                echo $FIELDS | jq -c '.[]' | while read -r field; do
+                  FIELD_NAME=$(echo $field | jq -r '.name')
+                  FIELD_VALUE=$(echo $field | jq -r '.value')
+                  
+                  COMMENT="${COMMENT}    - ${FIELD_NAME}: ${FIELD_VALUE}\n"
+                done
+              fi
+            done
+            
+            # 코멘트 추가
+            echo -e "$COMMENT" > comment.md
+            gh issue comment $ISSUE_NUMBER --repo $REPO --body-file comment.md
+            
+            echo "이슈에 프로젝트 정보 코멘트가 추가되었습니다"
+          else
+            echo "이 이슈에 연결된 프로젝트가 없습니다"
+            
+            # 프로젝트가 없다는 코멘트 추가
+            gh issue comment $ISSUE_NUMBER --repo $REPO --body "이 이슈에 연결된 프로젝트를 찾을 수 없습니다."
+          fi
