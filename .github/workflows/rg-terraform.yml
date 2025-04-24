@@ -509,10 +509,11 @@ jobs:
             });
 
   handle-rejection:
-    needs: terraform-apply
+    needs: [terraform-plan, terraform-apply]
     # 수정된 조건: terraform-apply가 완료되기 전에 실패하거나 취소된 경우에만 실행
     if: >
       always() && 
+      needs.terraform-plan.result == 'success' &&
       (needs.terraform-apply.result == 'failure' || 
        needs.terraform-apply.result == 'cancelled' || 
        needs.terraform-apply.result == 'skipped') && 
