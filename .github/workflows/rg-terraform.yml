@@ -70,7 +70,7 @@ jobs:
           terraform {
             backend "azurerm" {
               resource_group_name  = "terraform-state-rg"
-              storage_account_name = "tfstateaccount"
+              storage_account_name = "tfstatebithumbdev"
               container_name       = "tfstate"
               key                  = "poc/${POC_NAME}/terraform.tfstate"
             }
