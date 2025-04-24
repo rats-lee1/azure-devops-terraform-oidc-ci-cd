@@ -24,7 +24,7 @@ on:
         required: true
       AZURE_SUBSCRIPTION_ID:
         required: true
-      GITHUB_TOKEN:
+      GH_TOKEN:
         required: true
 
 jobs:
@@ -42,7 +42,7 @@ jobs:
         id: get-resource-group
         uses: actions/github-script@v6
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN }}
           script: |
             // workflow_call에서 전달받은 issue_number 사용
             const issue_number = ${{ inputs.issue_number }};
@@ -130,7 +130,7 @@ jobs:
         id: extract-poc-info
         uses: actions/github-script@v6
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN }}
           script: |
             // workflow_call에서 전달받은 issue_number 사용
             const issue_number = ${{ inputs.issue_number }};
@@ -280,7 +280,7 @@ jobs:
             fi
             
             # GitHub Token을 사용하여 로그인
-            echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+            echo "${{ secrets.GH_TOKEN }}" | gh auth login --with-token
             
             # 이슈에 코멘트 추가
             gh issue comment "${ISSUE_NUMBER}" --repo "${{ github.repository }}" --body "${COMMENT_BODY}"
