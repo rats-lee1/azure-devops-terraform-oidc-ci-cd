@@ -1,0 +1,162 @@
+name: Issue Project Parser
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  parse-project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyGithub requests
+
+      - name: Parse Projects from Issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          import os
+          import json
+          import requests
+          from github import Github
+
+          # GitHub 토큰으로 클라이언트 초기화
+          token = os.environ.get('GITHUB_TOKEN')
+          g = Github(token)
+          
+          # 환경 변수에서 이벤트 정보 가져오기
+          with open(os.environ.get('GITHUB_EVENT_PATH')) as f:
+              event = json.load(f)
+              
+          repo_name = event['repository']['full_name']
+          issue_number = event['issue']['number']
+          
+          owner, repo = repo_name.split('/')
+          
+          print(f"Processing issue #{issue_number} in {repo_name}")
+          
+          # 저장소와 이슈 객체 가져오기
+          repo_obj = g.get_repo(repo_name)
+          issue = repo_obj.get_issue(issue_number)
+          
+          # GraphQL 쿼리로 프로젝트 정보 가져오기
+          query = """
+          query($owner: String!, $repo: String!, $issueNumber: Int!) {
+            repository(owner: $owner, name: $repo) {
+              issue(number: $issueNumber) {
+                projectItems(first: 20) {
+                  nodes {
+                    project {
+                      title
+                      url
+                    }
+                  }
+                }
+                projectCards {
+                  nodes {
+                    column {
+                      name
+                    }
+                    project {
+                      name
+                      url
+                    }
+                  }
+                }
+              }
+            }
+          }
+          """
+          
+          variables = {
+              'owner': owner,
+              'repo': repo,
+              'issueNumber': issue_number
+          }
+          
+          headers = {
+              'Authorization': f'Bearer {token}',
+              'Content-Type': 'application/json'
+          }
+          
+          response = requests.post(
+              'https://api.github.com/graphql',
+              headers=headers,
+              json={'query': query, 'variables': variables}
+          )
+          
+          result = response.json()
+          
+          # 프로젝트 정보 파싱
+          projects = []
+          
+          # 프로젝트 v2 파싱
+          try:
+              project_v2_items = result['data']['repository']['issue']['projectItems']['nodes']
+              for item in project_v2_items:
+                  if item.get('project'):
+                      projects.append({
+                          'name': item['project']['title'],
+                          'url': item['project']['url'],
+                          'type': 'ProjectV2'
+                      })
+          except (KeyError, TypeError):
+              print("No ProjectV2 items found or error parsing them")
+          
+          # 클래식 프로젝트 파싱
+          try:
+              project_cards = result['data']['repository']['issue']['projectCards']['nodes']
+              for card in project_cards:
+                  if card.get('project'):
+                      project_info = {
+                          'name': card['project']['name'],
+                          'url': card['project']['url'],
+                          'type': 'Classic Project'
+                      }
+                      
+                      if card.get('column'):
+                          project_info['column'] = card['column']['name']
+                          
+                      projects.append(project_info)
+          except (KeyError, TypeError):
+              print("No classic project cards found or error parsing them")
+          
+          print(f"Found {len(projects)} projects")
+          
+          # 결과를 파일로 저장
+          with open('issue_projects.json', 'w') as f:
+              json.dump({
+                  'issueNumber': issue_number,
+                  'projects': projects
+              }, f, indent=2)
+          
+          # 이슈에 프로젝트 정보 코멘트 추가
+          if projects:
+              comment = "### 이 이슈와 연결된 프로젝트:\n\n"
+              for project in projects:
+                  comment += f"- [{project['name']}]({project['url']})"
+                  if project.get('column'):
+                      comment += f" ({project['column']} 칼럼)"
+                  comment += "\n"
+              
+              issue.create_comment(comment)
+              print("Comment with project information added to the issue")
+          else:
+              print("No projects found for this issue")
+        shell: python
+
+      - name: Upload project information as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: issue-projects
+          path: issue_projects.json
