@@ -25,10 +25,9 @@ jobs:
     needs: pre-checking
     runs-on: ubuntu-latest
     # POC 정보가 있는 경우에만 진행
-    if: always()
-    # if: >
-    #   needs.pre-checking.outputs.has_poc == 'true' &&
-    #   needs.pre-checking.outputs.resource_group_exists == 'false'
+    if: >
+      needs.pre-checking.outputs.has_poc == 'true' &&
+      needs.pre-checking.outputs.resource_group_exists == 'false'
     
     env:
       ARM_USE_OIDC: true
@@ -42,7 +41,7 @@ jobs:
         run: |
           echo "has_poc 값: ${{ needs.pre-checking.outputs.has_poc }}"
           echo "resource_group_exists 값: ${{ needs.pre-checking.outputs.resource_group_exists }}"
-
+          
       - uses: actions/checkout@v3
       
       - name: 'Check if secrets are set'

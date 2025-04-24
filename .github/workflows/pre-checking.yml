@@ -17,6 +17,9 @@ on:
       has_poc:
         description: 'POC 정보 존재 여부'
         value: ${{ jobs.pre-checking.outputs.has_poc }}
+      resource_group_exists:  
+        description: '리소스 그룹 존재 여부'
+        value: ${{ jobs.pre-checking.outputs.resource_group_exists }}
     secrets:
       AZURE_CLIENT_ID:
         required: true
