@@ -2,7 +2,11 @@ name: Issue Project Parser
 
 on:
   issues:
-    types: [opened]
+    types: [opened, edited]
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   parse-project:
@@ -43,7 +47,7 @@ jobs:
           
           owner, repo = repo_name.split('/')
           
-          print(f"Processing issue #{issue_number} in {repo_name}")
+          print(f"이슈 #{issue_number} 처리 중 ({repo_name})")
           
           # 저장소와 이슈 객체 가져오기
           repo_obj = g.get_repo(repo_name)
@@ -111,7 +115,7 @@ jobs:
                           'type': 'ProjectV2'
                       })
           except (KeyError, TypeError):
-              print("No ProjectV2 items found or error parsing them")
+              print("프로젝트 v2 항목을 찾을 수 없거나 파싱 오류 발생")
           
           # 클래식 프로젝트 파싱
           try:
@@ -129,16 +133,9 @@ jobs:
                           
                       projects.append(project_info)
           except (KeyError, TypeError):
-              print("No classic project cards found or error parsing them")
+              print("클래식 프로젝트 카드를 찾을 수 없거나 파싱 오류 발생")
           
-          print(f"Found {len(projects)} projects")
-          
-          # 결과를 파일로 저장
-          with open('issue_projects.json', 'w') as f:
-              json.dump({
-                  'issueNumber': issue_number,
-                  'projects': projects
-              }, f, indent=2)
+          print(f"총 {len(projects)}개의 프로젝트를 찾았습니다")
           
           # 이슈에 프로젝트 정보 코멘트 추가
           if projects:
@@ -150,13 +147,11 @@ jobs:
                   comment += "\n"
               
               issue.create_comment(comment)
-              print("Comment with project information added to the issue")
+              print("이슈에 프로젝트 정보 코멘트가 추가되었습니다")
           else:
-              print("No projects found for this issue")
-        shell: python
+              print("이 이슈에 연결된 프로젝트가 없습니다")
 
-      - name: Upload project information as artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: issue-projects
-          path: issue_projects.json
+              # 디버그 정보 출력
+              print("API 응답:")
+              print(json.dumps(result, indent=2))
+        shell: python
