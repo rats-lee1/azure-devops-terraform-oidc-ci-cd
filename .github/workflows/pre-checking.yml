@@ -268,7 +268,14 @@ jobs:
             
             # 이슈에 충돌 경고 코멘트 추가
             ISSUE_NUMBER="${{ inputs.issue_number }}"
-            COMMENT_BODY="### ⚠️ 리소스 그룹 충돌 경고\n\n요청하신 리소스 그룹 \`${RESOURCE_GROUP}\`은(는) 이미 존재합니다.\n\n**기존 리소스 그룹 정보:**\n- 위치: \`${LOCATION}\`\n\n다른 리소스 그룹 이름을 사용하시거나, 기존 리소스 그룹을 재사용하시려면 이슈를 수정해주세요."
+            COMMENT_BODY="### ⚠️ 리소스 그룹 충돌 경고
+
+            요청하신 리소스 그룹 \`${RESOURCE_GROUP}\`은(는) 이미 존재합니다.
+
+            **기존 리소스 그룹 정보:**
+            - 위치: \`${LOCATION}\`
+
+            다른 리소스 그룹 이름을 사용하시거나, 기존 리소스 그룹을 재사용하시려면 이슈를 수정해주세요."
             
             # GitHub CLI가 설치되어 있지 않으면 설치
             if ! command -v gh &> /dev/null; then
