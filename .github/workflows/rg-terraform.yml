@@ -307,8 +307,7 @@ jobs:
 
   cleanup-artifacts:
     needs: [terraform-plan, handle-rejection]
-    # terraform-plan 이 실제로 성공했을 때만 실행
-    if: always() && needs.terraform-plan.result == 'success'
+    if: always()
     runs-on: ubuntu-latest
 
     # 🟢 아티팩트 삭제용 API 호출 권한
