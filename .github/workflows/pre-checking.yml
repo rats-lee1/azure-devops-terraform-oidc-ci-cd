@@ -26,6 +26,7 @@ jobs:
       resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
       poc_name: ${{ steps.extract-poc-info.outputs.poc_name }}
       has_poc: ${{ steps.extract-poc-info.outputs.has_poc }}
+      resource_group_exists: ${{ steps.check-resource-group-exists.outputs.exists }}
     
     steps:
       - name: Extract Resource Group from Issue (Issue Forms)
@@ -227,10 +228,64 @@ jobs:
               }
             }
       
+      - name: 'Az CLI login with OIDC'
+        id: azure-login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Check if Resource Group already exists
+        id: check-resource-group-exists
+        if: steps.get-resource-group.outputs.resource_group != ''
+        run: |
+          RESOURCE_GROUP="${{ steps.get-resource-group.outputs.resource_group }}"
+          echo "리소스 그룹 '${RESOURCE_GROUP}' 존재 여부 확인 중..."
+          
+          # Azure CLI를 사용하여 리소스 그룹 존재 여부 확인
+          EXISTS=$(az group exists --name "${RESOURCE_GROUP}")
+          
+          if [ "$EXISTS" = "true" ]; then
+            echo "⚠️ 리소스 그룹 '${RESOURCE_GROUP}'이(가) 이미 존재합니다."
+            echo "exists=true" >> $GITHUB_OUTPUT
+            
+            # 기존 리소스 그룹 정보 가져오기
+            TAGS=$(az group show --name "${RESOURCE_GROUP}" --query tags -o json)
+            LOCATION=$(az group show --name "${RESOURCE_GROUP}" --query location -o tsv)
+            
+            echo "위치: ${LOCATION}"
+            echo "태그: ${TAGS}"
+            
+            # 이슈에 충돌 경고 코멘트 추가
+            ISSUE_NUMBER="${{ inputs.issue_number }}"
+            COMMENT_BODY="### ⚠️ 리소스 그룹 충돌 경고\n\n요청하신 리소스 그룹 \`${RESOURCE_GROUP}\`은(는) 이미 존재합니다.\n\n**기존 리소스 그룹 정보:**\n- 위치: \`${LOCATION}\`\n\n다른 리소스 그룹 이름을 사용하시거나, 기존 리소스 그룹을 재사용하시려면 이슈를 수정해주세요."
+            
+            # GitHub CLI가 설치되어 있지 않으면 설치
+            if ! command -v gh &> /dev/null; then
+              echo "GitHub CLI 설치 중..."
+              curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+              echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+              sudo apt update
+              sudo apt install gh
+            fi
+            
+            # GitHub Token을 사용하여 로그인
+            echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+            
+            # 이슈에 코멘트 추가
+            gh issue comment "${ISSUE_NUMBER}" --repo "${{ github.repository }}" --body "${COMMENT_BODY}"
+            
+          else
+            echo "✅ 리소스 그룹 '${RESOURCE_GROUP}'이(가) 존재하지 않습니다. 생성 가능합니다."
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Add Resource Group Summary
         run: |
           echo "## 리소스 그룹 및 POC 검증 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 이슈 번호: #${{ inputs.issue_number }}" >> $GITHUB_STEP_SUMMARY
           echo "- 식별된 리소스 그룹: **${{ steps.get-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 리소스 그룹 충돌: **${{ steps.check-resource-group-exists.outputs.exists == 'true' && '⚠️ 충돌 있음' || '✅ 충돌 없음' }}**" >> $GITHUB_STEP_SUMMARY
           echo "- POC 정보: **${{ steps.extract-poc-info.outputs.has_poc == 'true' && steps.extract-poc-info.outputs.poc_name || '없음' }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 검증 완료" >> $GITHUB_STEP_SUMMARY
