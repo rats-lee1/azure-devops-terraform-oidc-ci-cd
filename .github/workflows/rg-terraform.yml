@@ -2,7 +2,7 @@ name: 'Resource Group Issue Workflow'
 
 on:
   issues:
-    types: [labeled]
+    types: [opened]
   workflow_dispatch:
 
 concurrency:
