@@ -12,9 +12,9 @@ permissions:
 
 jobs:
   pre-checking:
-  uses: ./.github/workflows/pre-checking.yml
-  with:
-    issue_number: ${{ github.event.issue.number }}
+    uses: ./.github/workflows/pre-checking.yml
+    with:
+      issue_number: ${{ github.event.issue.number }}
 
   terraform-plan:
     needs: pre-checking
