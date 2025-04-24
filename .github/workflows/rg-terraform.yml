@@ -7,8 +7,8 @@ on:
 
 concurrency:
   group: issue-${{ github.event.issue.number }}
-  cancel-in-progress: true
-  
+  cancel-in-progress: true 
+
 permissions:
   id-token: write
   contents: read
@@ -17,8 +17,7 @@ permissions:
 jobs:
   pre-checking:
     runs-on: ubuntu-latest
-    # 라벨 이벤트인 경우 'resource_group' 라벨이 있을 때만 실행
-    if: github.event.label.name == 'resource_group' || contains(github.event.issue.labels.*.name, 'resource_group')
+
     outputs:
       resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
       poc_name: ${{ steps.extract-poc-info.outputs.poc_name }}
