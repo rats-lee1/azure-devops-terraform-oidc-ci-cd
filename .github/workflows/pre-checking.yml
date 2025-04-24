@@ -17,6 +17,15 @@ on:
       has_poc:
         description: 'POC 정보 존재 여부'
         value: ${{ jobs.pre-checking.outputs.has_poc }}
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+      GITHUB_TOKEN:
+        required: true
 
 jobs:
   pre-checking:
