@@ -11,12 +11,14 @@ permissions:
   issues: write
 
 jobs:
-  check-label-and-extract-resource-group:
+  pre-checking:
     runs-on: ubuntu-latest
     # 라벨 이벤트인 경우 'resource_group' 라벨이 있을 때만 실행
     if: github.event.label.name == 'resource_group' || contains(github.event.issue.labels.*.name, 'resource_group')
     outputs:
       resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
+      has_project: ${{ steps.check-project.outputs.has_project }}
+      project_name: ${{ steps.check-project.outputs.project_name }}
     steps:
       - name: Check for Resource Group Label
         id: check-label
@@ -120,12 +122,126 @@ jobs:
             
             console.log(`✅ Resource Group name: ${resourceGroup}`);
             core.setOutput('resource_group', resourceGroup);
+
+      - name: Check Project Assignment
+        id: check-project
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = context.payload.issue.number;
+            const repo = context.repo;
+            
+            try {
+              // GraphQL 쿼리로 이슈에 할당된 프로젝트 확인
+              const query = `
+                query($owner:String!, $name:String!, $issue_number:Int!) {
+                  repository(owner: $owner, name: $name) {
+                    issue(number: $issue_number) {
+                      projectItems(first: 10) {
+                        nodes {
+                          project {
+                            title
+                            number
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `;
+              
+              const variables = {
+                owner: repo.owner,
+                name: repo.repo,
+                issue_number: issue_number
+              };
+              
+              const result = await github.graphql(query, variables);
+              const projectItems = result.repository.issue.projectItems.nodes;
+              
+              let hasProject = false;
+              let projectName = '';
+              
+              if (projectItems && projectItems.length > 0) {
+                hasProject = true;
+                projectName = projectItems[0].project.title; // 첫 번째 프로젝트 제목 가져오기
+                console.log(`✅ Issue is assigned to project: ${projectName}`);
+              } else {
+                console.log('❌ Issue is not assigned to any project');
+              }
+              
+              // 출력 설정
+              core.setOutput('has_project', hasProject.toString());
+              core.setOutput('project_name', projectName);
+              
+              // 프로젝트가 없는 경우 코멘트 달기
+              if (!hasProject) {
+                await github.rest.issues.createComment({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  issue_number: issue_number,
+                  body: `## ⚠️ 프로젝트 할당 필요
+                  
+                  이 이슈는 현재 어떤 프로젝트에도 할당되어 있지 않습니다.
+                  원활한 작업 진행을 위해 적절한 프로젝트에 이슈를 할당해 주세요.
+                  
+                  프로젝트 할당 후 'resource_group' 라벨을 다시 추가하시면 워크플로우가 계속 진행됩니다.`
+                });
+                
+                // 리소스 그룹 라벨 제거 (워크플로우 중단 목적)
+                await github.rest.issues.removeLabel({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  issue_number: issue_number,
+                  name: 'resource_group'
+                });
+                
+                core.setFailed('Issue is not assigned to any project. Workflow stopped.');
+              }
+
+            } catch (error) {
+              console.log(`Error checking project assignment: ${error.message}`);
+              core.setOutput('has_project', 'false');
+              core.setOutput('project_name', '');
+              
+              // 오류 발생 시에도 코멘트 달기
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue_number,
+                body: `## ⚠️ 프로젝트 확인 오류
+                
+                프로젝트 할당 여부를 확인하는 동안 오류가 발생했습니다.
+                이슈를 적절한 프로젝트에 할당한 후 'resource_group' 라벨을 다시 추가해 주세요.
+                
+                오류: ${error.message}`
+              });
+              
+              // 라벨 제거
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  issue_number: issue_number,
+                  name: 'resource_group'
+                });
+              } catch (labelError) {
+                console.log(`Error removing label: ${labelError.message}`);
+              }
+              
+              core.setFailed(`Error checking project assignment: ${error.message}`);
+            }
       
       - name: Add Resource Group Summary
         run: |
           echo "## 리소스 그룹 검증 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 이슈 번호: #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
           echo "- 식별된 리소스 그룹: **${{ steps.get-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 프로젝트 할당: ${{ steps.check-project.outputs.has_project == 'true' && '✅ 할당됨' || '❌ 미할당' }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.check-project.outputs.has_project }}" == "true" ]; then
+            echo "- 할당된 프로젝트: **${{ steps.check-project.outputs.project_name }}**" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "- 상태: ✅ 검증 완료" >> $GITHUB_STEP_SUMMARY
 
   terraform-plan:
