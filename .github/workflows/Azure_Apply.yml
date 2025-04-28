@@ -17,57 +17,14 @@ permissions:
 jobs:
   # Apply 사전 검증 작업
   Pre-Check:
-    runs-on: ubuntu-latest
-    outputs:
-      resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
-      resource_group_exists: ${{ steps.check-resource-group-exists.outputs.exists }}
-      project_name: ${{ steps.extract-project-info.outputs.project_name }}
-    
-    steps:
-      - name: Get Issue Number
-        id: get-issue-number
-        run: |
-          ISSUE_NUMBER="${{ github.event.inputs.issue_number }}"
-          echo "이슈 번호: ${ISSUE_NUMBER}"
-          echo "issue_number=${ISSUE_NUMBER}" >> $GITHUB_OUTPUT
-    
-      - name: Get Issue Details
-        uses: actions/github-script@v6
-        id: get-issue-details
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const issue_number = ${{ github.event.inputs.issue_number }};
-            console.log(`이슈 번호: ${issue_number}`);
-            
-            try {
-              const issue = await github.rest.issues.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issue_number
-              });
-              
-              console.log(`이슈 제목: ${issue.data.title}`);
-              console.log(`이슈 본문 길이: ${issue.data.body ? issue.data.body.length : 0}`);
-              
-              return {
-                title: issue.data.title,
-                body: issue.data.body || ""
-              };
-            } catch (error) {
-              console.error(`이슈 가져오기 실패: ${error.message}`);
-              core.setFailed(`이슈 가져오기 실패: ${error.message}`);
-            }
-    
-      - name: Call Pre-Check Workflow
-        uses: ./.github/workflows/Pre-Check.yml
-        with:
-          issue_number: ${{ github.event.inputs.issue_number }}
-        secrets:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/Pre-Check.yml
+    with:
+      issue_number: ${{ github.event.inputs.issue_number }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   terraform-plan:
     needs: Pre-Check
