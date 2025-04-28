@@ -6,7 +6,7 @@ on:
       issue_number:
         description: '처리할 이슈 번호'
         required: true
-        type: number
+        type: string
 
 permissions:
   id-token: write
