@@ -40,13 +40,28 @@ jobs:
 
       # 4) 커밋 & 푸시 (변경 있을 때만)
       - name: Commit & push changes
+        env:
+          FILE: .github/ISSUE_TEMPLATE/resource_apply.yaml   # 반드시 존재하는 절대·상대경로
+          PROJECT: ${{ github.event.inputs.project_name }}
         run: |
+          set -e
+
+          # 1) Git 사용자 설정
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 2) 경로 확인 (디버그용)
+          echo "FILE path → $FILE"
+          test -n "$FILE" && test -f "$FILE"   # 비어 있거나 없으면 즉시 실패
+
+          # 3) 변경 내용 스테이징
           git add "$FILE"
+
+          # 4) 변경이 있으면 커밋/푸시, 없으면 스킵
           if git diff --cached --quiet; then
-            echo "No update needed—template already had $PROJECT"
+            echo "No changes to commit – template already up-to-date."
           else
             git commit -m "chore: add $PROJECT to Issue Form dropdown"
-            git push origin ${{ github.ref }}
+            git push origin "${GITHUB_REF}"
           fi
+
