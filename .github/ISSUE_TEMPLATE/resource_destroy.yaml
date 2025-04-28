@@ -1,0 +1,71 @@
+name: Azure 리소스 삭제 요청서
+description: Azure 리소스 그룹 삭제 요청을 위한 템플릿입니다
+title: "[Destroy] 리소스 그룹 삭제 요청"
+labels: []
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 리소스 그룹 삭제 요청
+        아래 정보를 작성하여 리소스 그룹 삭제를 요청해주세요.
+
+  - type: dropdown
+    id: project_name
+    attributes:
+      label: 프로젝트명
+      description: 관련 프로젝트를 선택하세요
+      options:
+        - Project A
+        - Project B
+        - Project C
+        - Project D
+        - 기타 (아래 추가 정보에 상세 기재)
+    validations:
+      required: true
+
+  - type: input
+    id: resource_group_name
+    attributes:
+      label: 리소스_그룹명
+      description: 삭제할 리소스 그룹의 이름을 입력하세요
+      placeholder: "예: my-project-rg"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: delete_reason
+    attributes:
+      label: 삭제 사유
+      description: 리소스 그룹을 삭제하는 주된 이유를 선택하세요
+      options:
+        - 프로젝트 종료
+        - 테스트 환경 정리
+        - 비용 절감
+        - 리소스 재구성
+        - 기타 (아래 추가 정보에 상세 기재)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: 삭제 확인
+      description: 다음 확인 사항을 읽고 체크해주세요
+      options:
+        - label: 해당 리소스 그룹에 있는 모든 리소스가 삭제됨을 이해했습니다
+          required: true
+        - label: 중요한 데이터는 백업했습니다
+          required: true
+        - label: 이 작업은 되돌릴 수 없음을 이해했습니다
+          required: true
+
+  - type: textarea
+    id: additional_info
+    attributes:
+      label: 추가 정보
+      description: 삭제와 관련해 추가로 알려야 할 정보가 있다면 작성해주세요
+      placeholder: "예: 특정 리소스만 삭제해주세요..."
+    validations:
+      required: false
