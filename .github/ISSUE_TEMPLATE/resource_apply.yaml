@@ -1,7 +1,7 @@
-name: 리소스 그룹 배포 요청
+name: 리소스 요청서
 description: 새로운 리소스 그룹 배포 또는 기존 리소스 그룹 업데이트 요청
-title: "[POC-INIT] "
-labels: ["resource_group"]
+title: "[Apply] "
+labels: ["Pending Review"]
 assignees: []
 body:
   - type: markdown
