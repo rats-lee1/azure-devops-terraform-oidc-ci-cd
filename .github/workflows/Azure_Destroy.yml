@@ -7,10 +7,6 @@ on:
         description: '처리할 이슈 번호'
         required: true
         type: number
-      project_name:
-        description: '프로젝트 이름 (tfstate key에 필요)'
-        required: true
-        type: string
 
 permissions:
   id-token: write
@@ -43,52 +39,22 @@ jobs:
               issue_number: issue_number
             });
             
-            // 정보 추출
-            let resourceGroup = null;
+            const issue_body = issue.data.body;
+            
+            // 프로젝트명 추출
             let projectName = null;
-            const issueBody = issue.data.body;
-            
-            // 리소스 그룹명 추출
-            if (issueBody) {
-              const resourceGroupMatch = issueBody.match(/### 리소스_그룹명\s*\n\n([^\n]+)/);
-              if (resourceGroupMatch && resourceGroupMatch[1].trim() !== '') {
-                resourceGroup = resourceGroupMatch[1].trim();
-                console.log(`✅ 리소스 그룹명 추출: ${resourceGroup}`);
-              }
-              
-              // 프로젝트명 추출
-              const projectMatch = issueBody.match(/### 프로젝트명\s*\n\n([^\n]+)/);
-              if (projectMatch && projectMatch[1].trim() !== '') {
-                projectName = projectMatch[1].trim();
-                console.log(`✅ 프로젝트명 추출: ${projectName}`);
-                
-                // 프로젝트명에서 "기타"인 경우 처리
-                if (projectName.includes("기타")) {
-                  // 추가 정보 섹션에서 상세 프로젝트명 찾기 시도
-                  const additionalInfoMatch = issueBody.match(/### 추가 정보\s*\n\n([^#]+)/s);
-                  if (additionalInfoMatch) {
-                    const additionalInfo = additionalInfoMatch[1].trim();
-                    console.log(`추가 정보에서 프로젝트명 확인 필요: ${additionalInfo}`);
-                  }
-                }
-              }
+            const projectNameMatch = issue_body.match(/프로젝트명\s*:\s*([^\n]+)/);
+            if (projectNameMatch && projectNameMatch[1]) {
+              projectName = projectNameMatch[1].trim();
             }
-            
-            if (!resourceGroup) {
-              core.setFailed('이슈 본문에서 리소스 그룹명을 찾을 수 없습니다.');
+
+            if (!projectName) {
+              core.setFailed('이슈 본문에서 프로젝트명을 찾을 수 없습니다.');
               return;
             }
             
-            console.log(`✅ 삭제할 리소스 그룹: ${resourceGroup}`);
-            core.setOutput('resource_group', resourceGroup);
-            
-            if (projectName) {
-              console.log(`✅ 프로젝트명: ${projectName}`);
-              core.setOutput('project_name', projectName);
-            } else {
-              console.log(`⚠️ 프로젝트명을 찾을 수 없습니다. 리소스 그룹명을 프로젝트명으로 사용합니다.`);
-              core.setOutput('project_name', resourceGroup);
-            }
+            console.log(`✅ 프로젝트명: ${projectName}`);
+            core.setOutput('project_name', projectName);
           
       - name: Confirm Destruction Request
         id: confirm-destruction
