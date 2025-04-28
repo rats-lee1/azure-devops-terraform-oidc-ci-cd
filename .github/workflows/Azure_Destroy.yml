@@ -268,17 +268,26 @@ jobs:
             const success = "${{ steps.terraform-destroy.outputs.success }}" === "true";
             
             // 1) 기존 라벨 제거
+            // 2. 모든 라벨 제거
             try {
-              await github.rest.issues.removeLabel({
-                owner: repo.owner,
-                repo: repo.repo,
-                issue_number: issue_number,
-                name: 'deletion-in-progress'
+              // 현재 이슈의 모든 라벨 조회
+              const issueData = await github.rest.issues.get({
+                owner, repo, issue_number
               });
-            } catch (e) {
-              console.log('라벨 제거 중 오류. 이미 제거되었을 수 있음:', e.message);
-            }
-            
+              
+              // 이슈에 달려있는 모든 라벨 제거
+              if (issueData.data.labels && issueData.data.labels.length > 0) {
+                for (const label of issueData.data.labels) {
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number,
+                    name: label.name
+                  });
+                }
+                console.log("모든 라벨이 제거되었습니다.");
+              } else {
+                console.log("제거할 라벨이 없습니다.");
+              }
+
             // 2) 상태에 따라 라벨 추가 및 코멘트 추가
             if (success) {
               // 리소스 삭제 성공
@@ -297,6 +306,12 @@ jobs:
                 
                 프로젝트 \`${projectName}\`의 모든 리소스가 성공적으로 삭제되었습니다.
                 Terraform을 통해 리소스가 삭제되었으며, 상태 파일도 업데이트되었습니다.`
+              });
+              await github.rest.issues.update({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue_number,
+                state: 'closed'
               });
             } else {
               // 리소스 삭제 실패
