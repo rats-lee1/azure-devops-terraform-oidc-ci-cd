@@ -18,9 +18,7 @@ jobs:
   Destroy-Check:
     runs-on: ubuntu-latest
     outputs:
-      resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
-      project_name: ${{ steps.get-project-name.outputs.project_name }}
-      confirmed: ${{ steps.confirm-destruction.outputs.confirmed }}
+      project_name: ${{ steps.get-issue-info.outputs.project_name }}
     
     steps:
       - name: Get Issue Number and Extract Information
@@ -110,7 +108,6 @@ jobs:
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      RESOURCE_GROUP: ${{ needs.Destroy-Check.outputs.resource_group }}
       PROJECT_NAME: ${{ needs.Destroy-Check.outputs.project_name }}
     
     steps:
@@ -148,9 +145,9 @@ jobs:
               owner: repo.owner,
               repo: repo.repo,
               issue_number: issue_number,
-              body: `## 리소스 그룹 삭제 시작 ⚡
+              body: `## 리소스 삭제 시작 ⚡
               
-              리소스 그룹 \`${{ needs.Destroy-Check.outputs.resource_group }}\`의 삭제가 시작되었습니다.
+              프로젝트 \`${{ needs.Destroy-Check.outputs.project_name }}\`의 리소스 삭제가 시작되었습니다.
               삭제 작업이 진행 중입니다. 잠시만 기다려주세요.`
             });
       
@@ -194,215 +191,45 @@ jobs:
           echo "생성된 백엔드 파일 내용:"
           cat backend.tf
 
-      - name: Initialize Terraform to access state
+      - name: Initialize Terraform
         id: terraform-init
         run: |
           # 프로젝트 구조에 따라 terraform 디렉토리 또는 루트에서 실행
-          if [ -d "terraform" ] && [ -f "terraform/backend.tf" ]; then
+          if [ -d "terraform" ]; then
             cd terraform
+            cp ../backend.tf .
             echo "terraform 디렉토리에서 초기화 실행..."
             terraform init
+            TERRAFORM_DIR="terraform"
           else
             echo "루트 디렉토리에서 초기화 실행..."
             terraform init
+            TERRAFORM_DIR="."
           fi
           echo "✅ Terraform 초기화 완료"
-      
-      - name: Extract Resource Group from tfstate
-        id: extract-rg-from-tfstate
-        run: |
-          # 프로젝트 구조에 따라 경로 결정
-          if [ -d "terraform" ] && [ -f "terraform/backend.tf" ]; then
-            cd terraform
-          fi
-          
-          # tfstate의 리소스 그룹 확인 시도
-          echo "Terraform 상태 파일에서 리소스 그룹 정보 확인 중..."
-          
-          # 리소스 그룹 출력 시도
-          TFSTATE_RG=""
-          if terraform state list | grep -q "azurerm_resource_group"; then
-            echo "✅ Terraform 상태 파일에서 리소스 그룹 찾음"
-            
-            # 상태 파일의 첫 번째 리소스 그룹 이름 추출
-            FIRST_RG_RESOURCE=$(terraform state list | grep "azurerm_resource_group" | head -n 1)
-            if [ -n "$FIRST_RG_RESOURCE" ]; then
-              RG_NAME=$(terraform state show "$FIRST_RG_RESOURCE" | grep "name" | head -n 1 | cut -d '=' -f2 | tr -d ' "')
-              echo "찾은 리소스 그룹: $RG_NAME"
-              TFSTATE_RG="$RG_NAME"
-            fi
-          fi
-          
-          # 결과 출력
-          if [ -n "$TFSTATE_RG" ]; then
-            echo "tfstate_resource_group=$TFSTATE_RG" >> $GITHUB_OUTPUT
-            echo "tfstate_found=true" >> $GITHUB_OUTPUT
-          else
-            echo "⚠️ Terraform 상태 파일에서 리소스 그룹을 찾을 수 없습니다."
-            echo "tfstate_found=false" >> $GITHUB_OUTPUT
-          fi
+          echo "terraform_dir=$TERRAFORM_DIR" >> $GITHUB_OUTPUT
 
-      - name: Check Resource Group Existence
-        id: check-rg
-        run: |
-          # tfstate에서 확인된 리소스 그룹 (있는 경우)
-          TFSTATE_RG="${{ steps.extract-rg-from-tfstate.outputs.tfstate_resource_group }}"
-          TFSTATE_FOUND="${{ steps.extract-rg-from-tfstate.outputs.tfstate_found }}"
-          
-          # 최종 삭제할 리소스 그룹 결정 - tfstate 우선 사용
-          if [ "$TFSTATE_FOUND" = "true" ] && [ -n "$TFSTATE_RG" ]; then
-            echo "✅ tfstate에서 확인된 리소스 그룹 '$TFSTATE_RG'을(를) 사용합니다."
-            TARGET_RG="$TFSTATE_RG"
-          else
-            echo "⚠️ tfstate에서 리소스 그룹을 찾을 수 없어 이슈에서 지정된 '${{ env.RESOURCE_GROUP }}'을(를) 사용합니다."
-            TARGET_RG="${{ env.RESOURCE_GROUP }}"
-          fi
-          
-          echo "target_resource_group=$TARGET_RG" >> $GITHUB_OUTPUT
-          
-          # 리소스 그룹 존재 여부 확인
-          if az group exists --name "$TARGET_RG" | grep -q "true"; then
-            echo "리소스 그룹 '$TARGET_RG'이(가) 존재함을 확인했습니다."
-            echo "exists=true" >> $GITHUB_OUTPUT
-            
-            # 리소스 그룹에 속한 리소스 목록 출력
-            echo "리소스 그룹 내 리소스 목록:"
-            az resource list --resource-group "$TARGET_RG" --query "[].{name:name, type:type}" -o table
-          else
-            echo "리소스 그룹 '$TARGET_RG'이(가) 존재하지 않습니다!"
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Delete Resources using Terraform
+      - name: Destroy Resources with Terraform
         id: terraform-destroy
-        if: steps.extract-rg-from-tfstate.outputs.tfstate_found == 'true'
         run: |
-          echo "Terraform을 사용하여 리소스 삭제 시작..."
+          TERRAFORM_DIR="${{ steps.terraform-init.outputs.terraform_dir }}"
           
-          # 프로젝트 구조에 따라 경로 결정
-          if [ -d "terraform" ] && [ -f "terraform/backend.tf" ]; then
+          if [ "$TERRAFORM_DIR" = "terraform" ]; then
             cd terraform
           fi
           
-          # terraform destroy 실행
+          echo "Terraform destroy 명령 실행 중..."
+          echo "모든 리소스를 한번에 삭제합니다..."
+          
           if terraform destroy -auto-approve; then
-            echo "✅ Terraform destroy 성공적으로 완료"
+            echo "✅ Terraform destroy 성공적으로 완료되었습니다."
             echo "success=true" >> $GITHUB_OUTPUT
           else
             echo "❌ Terraform destroy 실패"
             echo "success=false" >> $GITHUB_OUTPUT
             exit 1
           fi
-      
-      - name: Check if Resource Group still exists after Terraform destroy
-        id: check-rg-after-terraform
-        if: steps.terraform-destroy.outcome == 'success'
-        run: |
-          TARGET_RG="${{ steps.check-rg.outputs.target_resource_group }}"
-          
-          if az group exists --name "$TARGET_RG" | grep -q "true"; then
-            echo "⚠️ 리소스 그룹 '$TARGET_RG'이(가) Terraform destroy 후에도
-            여전히 존재합니다. Azure CLI로 직접 삭제를 시도합니다."
-            echo "still_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "✅ 리소스 그룹 '$TARGET_RG'이(가) Terraform에 의해 성공적으로 삭제되었습니다."
-            echo "still_exists=false" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Delete Resource Group with Azure CLI (fallback)
-        id: delete-rg-cli
-        if: |
-          (steps.terraform-destroy.outcome == 'failure' || steps.check-rg-after-terraform.outputs.still_exists == 'true') && 
-          steps.check-rg.outputs.exists == 'true'
-        run: |
-          TARGET_RG="${{ steps.check-rg.outputs.target_resource_group }}"
-          echo "Azure CLI를 사용하여 리소스 그룹 '$TARGET_RG' 직접 삭제 중..."
-          
-          # 진행 상황을 표시하는 진행 안내 시작
-          echo "이 작업은 몇 분 정도 걸릴 수 있습니다."
-          
-          # 리소스 그룹 삭제
-          if az group delete --name "$TARGET_RG" --yes; then
-            echo "✅ Azure CLI로 리소스 그룹 삭제 완료"
-            echo "success=true" >> $GITHUB_OUTPUT
-            
-            # 이미 삭제된 리소스를 Terraform 상태에서 제거
-            if [ "${{ steps.extract-rg-from-tfstate.outputs.tfstate_found }}" = "true" ]; then
-              echo "Terraform 상태에서 삭제된 리소스 제거 중..."
-              
-              # 프로젝트 구조에 따라 경로 결정
-              if [ -d "terraform" ] && [ -f "terraform/backend.tf" ]; then
-                cd terraform
-              fi
-              
-              # 리소스 그룹 관련 항목 찾기
-              RESOURCES=$(terraform state list | grep -i "azurerm_resource_group\\|azurerm_resources\\|azurerm_resource")
-              
-              # 발견된 모든 리소스를 상태에서 제거
-              if [ -n "$RESOURCES" ]; then
-                echo "다음 항목을 상태에서 제거합니다:"
-                echo "$RESOURCES"
-                
-                echo "$RESOURCES" | while read -r resource; do
-                  echo "제거 중: $resource"
-                  terraform state rm "$resource" || echo "⚠️ 상태 제거 실패: $resource"
-                done
-                
-                echo "✅ Terraform 상태 정리 완료"
-              else
-                echo "⚠️ Terraform 상태에서 제거할 리소스 그룹 관련 항목을 찾을 수 없습니다."
-              fi
-            fi
-          else
-            echo "❌ Azure CLI로 리소스 그룹 삭제 실패"
-            echo "success=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-          
-          # 실제로 삭제되었는지 한 번 더 확인
-          if az group exists --name "$TARGET_RG" | grep -q "false"; then
-            echo "✅ 리소스 그룹이 성공적으로 삭제되었음을 확인했습니다."
-          else
-            echo "⚠️ 리소스 그룹이 아직 존재합니다. 삭제 중이거나 문제가 발생했을 수 있습니다."
-          fi
-      
-      - name: Handle Non-Existent Resource Group
-        if: steps.terraform-destroy.outcome != 'success' && steps.check-rg.outputs.exists == 'false'
-        run: |
-          TARGET_RG="${{ steps.check-rg.outputs.target_resource_group }}"
-          echo "⚠️ 요청한 리소스 그룹 '$TARGET_RG'이(가) 존재하지 않아 삭제할 수 없습니다."
-          echo "## 리소스 그룹 존재하지 않음" >> $GITHUB_STEP_SUMMARY
-          echo "- 리소스 그룹: **$TARGET_RG**" >> $GITHUB_STEP_SUMMARY
-          echo "- 상태: ⚠️ 이미 삭제되었거나 존재하지 않음" >> $GITHUB_STEP_SUMMARY
-          
-          # tfstate에 리소스가 남아있다면 terraform state rm 실행
-          if [ "${{ steps.extract-rg-from-tfstate.outputs.tfstate_found }}" = "true" ]; then
-            echo "리소스 그룹은 존재하지 않지만 Terraform 상태에서 정리 시도..."
-            
-            # 프로젝트 구조에 따라 경로 결정
-            if [ -d "terraform" ] && [ -f "terraform/backend.tf" ]; then
-              cd terraform
-            fi
-            
-            # 리소스 그룹 관련 항목 찾기
-            RESOURCES=$(terraform state list | grep -i "azurerm_resource_group\\|azurerm_resources\\|azurerm_resource")
-            
-            # 발견된 모든 리소스를 상태에서 제거
-            if [ -n "$RESOURCES" ]; then
-              echo "다음 항목을 상태에서 제거합니다:"
-              echo "$RESOURCES"
-              
-              echo "$RESOURCES" | while read -r resource; do
-                echo "제거 중: $resource"
-                terraform state rm "$resource" || echo "⚠️ 상태 제거 실패: $resource"
-              done
-              
-              echo "✅ Terraform 상태 정리 완료"
-            else
-              echo "⚠️ Terraform 상태에서 제거할 리소스 그룹 관련 항목을 찾을 수 없습니다."
-            fi
-          fi
-      
+
       - name: Notify Completion
         uses: actions/github-script@v6
         if: always()
@@ -411,14 +238,8 @@ jobs:
           script: |
             const issue_number = ${{ github.event.inputs.issue_number }};
             const repo = context.repo;
-            const resourceGroup = "${{ steps.check-rg.outputs.target_resource_group }}";
-            const exists = "${{ steps.check-rg.outputs.exists }}" === "true";
-            const tfstateFound = "${{ steps.extract-rg-from-tfstate.outputs.tfstate_found }}" === "true";
-            
-            // 삭제 성공 여부 확인
-            const terraformSuccess = "${{ steps.terraform-destroy.outputs.success }}" === "true";
-            const azureCliSuccess = "${{ steps.delete-rg-cli.outputs.success }}" === "true";
-            const success = terraformSuccess || azureCliSuccess;
+            const projectName = "${{ needs.Destroy-Check.outputs.project_name }}";
+            const success = "${{ steps.terraform-destroy.outputs.success }}" === "true";
             
             // 1) 기존 라벨 제거
             try {
@@ -433,32 +254,8 @@ jobs:
             }
             
             // 2) 상태에 따라 라벨 추가 및 코멘트 추가
-            if (!exists) {
-              // 리소스 그룹이 존재하지 않는 경우
-              await github.rest.issues.addLabels({
-                owner: repo.owner,
-                repo: repo.repo,
-                issue_number: issue_number,
-                labels: ['no-resource-found']
-              });
-              
-              let commentBody = `## 리소스 그룹 존재하지 않음 ⚠️
-              
-              요청하신 리소스 그룹 \`${resourceGroup}\`을(를) 찾을 수 없습니다.
-              이미 삭제되었거나 존재하지 않는 리소스 그룹입니다.`;
-              
-              if (tfstateFound) {
-                commentBody += `\n\n그러나 Terraform 상태 파일에서는 리소스가 발견되어 상태 파일에서 해당 리소스를 제거했습니다.`;
-              }
-              
-              await github.rest.issues.createComment({
-                owner: repo.owner,
-                repo: repo.repo,
-                issue_number: issue_number,
-                body: commentBody
-              });
-            } else if (success) {
-              // 리소스 그룹 삭제 성공
+            if (success) {
+              // 리소스 삭제 성공
               await github.rest.issues.addLabels({
                 owner: repo.owner,
                 repo: repo.repo,
@@ -466,24 +263,17 @@ jobs:
                 labels: ['Completed']
               });
               
-              let commentBody = `## 리소스 그룹 삭제 완료 ✅
-              
-              리소스 그룹 \`${resourceGroup}\`이(가) 성공적으로 삭제되었습니다.`;
-              
-              if (terraformSuccess) {
-                commentBody += `\n\nTerraform을 통해 리소스가 삭제되었으며, 상태 파일도 업데이트되었습니다.`;
-              } else if (azureCliSuccess && tfstateFound) {
-                commentBody += `\n\nAzure CLI를 통해 리소스가 삭제되었으며, Terraform 상태 파일에서도 해당 리소스를 제거했습니다.`;
-              }
-              
               await github.rest.issues.createComment({
                 owner: repo.owner,
                 repo: repo.repo,
                 issue_number: issue_number,
-                body: commentBody
+                body: `## 리소스 삭제 완료 ✅
+                
+                프로젝트 \`${projectName}\`의 모든 리소스가 성공적으로 삭제되었습니다.
+                Terraform을 통해 리소스가 삭제되었으며, 상태 파일도 업데이트되었습니다.`
               });
             } else {
-              // 리소스 그룹 삭제 실패
+              // 리소스 삭제 실패
               await github.rest.issues.addLabels({
                 owner: repo.owner,
                 repo: repo.repo,
@@ -495,51 +285,22 @@ jobs:
                 owner: repo.owner,
                 repo: repo.repo,
                 issue_number: issue_number,
-                body: `## 리소스 그룹 삭제 실패 ❌
+                body: `## 리소스 삭제 실패 ❌
                 
-                리소스 그룹 \`${resourceGroup}\` 삭제 중 오류가 발생했습니다.
+                프로젝트 \`${projectName}\`의 리소스 삭제 중 오류가 발생했습니다.
                 워크플로우 로그를 확인하여 자세한 오류 내용을 확인해주세요.`
               });
             }
       
       - name: Final Summary
         run: |
-          TARGET_RG="${{ steps.check-rg.outputs.target_resource_group }}"
-          TFSTATE_FOUND="${{ steps.extract-rg-from-tfstate.outputs.tfstate_found }}"
-          TERRAFORM_SUCCESS="${{ steps.terraform-destroy.outputs.success }}"
-          AZURE_CLI_SUCCESS="${{ steps.delete-rg-cli.outputs.success }}"
-          
-          echo "## 리소스 그룹 삭제 요약" >> $GITHUB_STEP_SUMMARY
+          echo "## 리소스 삭제 요약" >> $GITHUB_STEP_SUMMARY
           echo "- 프로젝트 이름: **${{ env.PROJECT_NAME }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- 이슈에 지정된 리소스 그룹: **${{ env.RESOURCE_GROUP }}**" >> $GITHUB_STEP_SUMMARY
           
-          if [ "$TFSTATE_FOUND" = "true" ]; then
-            echo "- Terraform 상태 파일의 리소스 그룹: **${{ steps.extract-rg-from-tfstate.outputs.tfstate_resource_group }}**" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.terraform-destroy.outputs.success }}" = "true" ]; then
+            echo "- 상태: ✅ Terraform으로 성공적으로 삭제됨" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- Terraform 상태 파일에서 리소스 그룹을 찾을 수 없음" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "- 실제 삭제 대상 리소스 그룹: **$TARGET_RG**" >> $GITHUB_STEP_SUMMARY
-          
-          # 삭제 방법과 상태 요약
-          if [ "${{ steps.check-rg.outputs.exists }}" = "true" ]; then
-            if [ "$TERRAFORM_SUCCESS" = "true" ]; then
-              echo "- 상태: ✅ Terraform으로 성공적으로 삭제됨" >> $GITHUB_STEP_SUMMARY
-            elif [ "$AZURE_CLI_SUCCESS" = "true" ]; then
-              echo "- 상태: ✅ Azure CLI로 성공적으로 삭제됨" >> $GITHUB_STEP_SUMMARY
-              
-              if [ "$TFSTATE_FOUND" = "true" ]; then
-                echo "- Terraform 상태: ✅ 상태 파일에서 수동으로 리소스 제거됨" >> $GITHUB_STEP_SUMMARY
-              fi
-            else
-              echo "- 상태: ❌ 삭제 실패" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
-            echo "- 상태: ⚠️ 리소스 그룹이 존재하지 않음" >> $GITHUB_STEP_SUMMARY
-            
-            if [ "$TFSTATE_FOUND" = "true" ]; then
-              echo "- Terraform 상태: ✅ 상태 파일에서 수동으로 리소스 제거됨" >> $GITHUB_STEP_SUMMARY
-            fi
+            echo "- 상태: ❌ 삭제 실패" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "- 완료 시간: $(date)" >> $GITHUB_STEP_SUMMARY
