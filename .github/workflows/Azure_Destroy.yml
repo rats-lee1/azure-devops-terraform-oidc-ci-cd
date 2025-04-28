@@ -55,7 +55,7 @@ jobs:
             
             // 리소스 그룹명 추출
             let resourceGroupName = null;
-            const resourceGroupMatch = issue_body.match(/###\s*리소스\s*그룹명\s*\n([^\n]+)/);
+            const resourceGroupMatch = issue_body.match(/###\s*리소스_그룹명\s*\n([^\n]+)/);
             if (resourceGroupMatch && resourceGroupMatch[1]) {
               resourceGroupName = resourceGroupMatch[1].trim();
             }
