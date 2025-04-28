@@ -11,8 +11,8 @@ permissions:
   issues: write
 
 jobs:
-  pre-checking:
-    uses: ./.github/workflows/pre-checking.yml
+  Pre-Check:
+    uses: ./.github/workflows/Pre-Check.yml
     with:
       issue_number: ${{ github.event.issue.number }}
     secrets:
@@ -22,20 +22,20 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   terraform-plan:
-    needs: pre-checking
+    needs: Pre-Check
     runs-on: ubuntu-latest
     # POC 정보가 있는 경우에만 진행
     if: >
-      needs.pre-checking.outputs.has_poc == 'true' &&
-      needs.pre-checking.outputs.resource_group_exists == 'false'
+      needs.Pre-Check.outputs.has_poc == 'true' &&
+      needs.Pre-Check.outputs.resource_group_exists == 'false'
     
     env:
       ARM_USE_OIDC: true
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      TF_VAR_resource_group_name: ${{ needs.pre-checking.outputs.resource_group }}
-      POC_NAME: ${{ needs.pre-checking.outputs.poc_name }}
+      TF_VAR_resource_group_name: ${{ needs.Pre-Check.outputs.resource_group }}
+      POC_NAME: ${{ needs.Pre-Check.outputs.poc_name }}
     
     steps:
       - uses: actions/checkout@v3
@@ -105,7 +105,7 @@ jobs:
           # 요약 추가
           echo "## Terraform Plan 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
-          echo "- POC: **${{ needs.pre-checking.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- POC: **${{ needs.Pre-Check.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ Plan 완료" >> $GITHUB_STEP_SUMMARY
       
       - name: Upload Terraform Plan
@@ -127,21 +127,21 @@ jobs:
               issue_number: issue_number,
               body: `## Terraform Plan 완료 ✅
               
-              리소스 그룹: \`${{ needs.pre-checking.outputs.resource_group }}\`
-              POC: \`${{ needs.pre-checking.outputs.poc_name }}\`
+              리소스 그룹: \`${{ needs.Pre-Check.outputs.resource_group }}\`
+              POC: \`${{ needs.Pre-Check.outputs.poc_name }}\`
               
               Plan이 완료되었습니다. 팀장님의 승인 후 Apply가 진행됩니다.`
             });
 
   handle-missing-poc:
-    needs: pre-checking
-    if: needs.pre-checking.outputs.has_poc == 'false'
+    needs: Pre-Check
+    if: needs.Pre-Check.outputs.has_poc == 'false'
     runs-on: ubuntu-latest
     steps:
       - name: Update Summary for Missing POC
         run: |
           echo "## 작업 중단 - POC 정보 누락" >> $GITHUB_STEP_SUMMARY
-          echo "- 리소스 그룹: **${{ needs.pre-checking.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 리소스 그룹: **${{ needs.Pre-Check.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ❌ POC 정보가 누락되어 배포가 중단되었습니다" >> $GITHUB_STEP_SUMMARY
           echo "- 조치: POC 라벨을 추가한 후 다시 시도해주세요." >> $GITHUB_STEP_SUMMARY
 
@@ -163,10 +163,10 @@ jobs:
             }
 
   terraform-apply:
-    needs: [pre-checking, terraform-plan]
+    needs: [Pre-Check, terraform-plan]
     runs-on: ubuntu-latest
     # POC 정보가 있는 경우에만 진행
-    if: needs.pre-checking.outputs.has_poc == 'true'
+    if: needs.Pre-Check.outputs.has_poc == 'true'
     environment: 
       name: production
       url: ${{ github.server_url }}/${{ github.repository }}/issues/${{ github.event.issue.number }}
@@ -179,7 +179,7 @@ jobs:
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      TF_VAR_resource_group_name: ${{ needs.pre-checking.outputs.resource_group }}
+      TF_VAR_resource_group_name: ${{ needs.Pre-Check.outputs.resource_group }}
     
     steps:
       - name: Get Approval Status
@@ -227,7 +227,7 @@ jobs:
           # 요약 시작
           echo "## Terraform Apply 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
-          echo "- POC: **${{ needs.pre-checking.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- POC: **${{ needs.Pre-Check.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 성공적으로 배포됨" >> $GITHUB_STEP_SUMMARY
           
           # 리소스 목록 출력 (선택적)
@@ -243,7 +243,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const issue_number = context.payload.issue.number;
-            const resourceGroupName = "${{ needs.pre-checking.outputs.resource_group }}";
+            const resourceGroupName = "${{ needs.Pre-Check.outputs.resource_group }}";
             const subscriptionId = "${{ secrets.AZURE_SUBSCRIPTION_ID }}";
             
             // Azure 포털 링크 생성
@@ -256,7 +256,7 @@ jobs:
               body: `## Terraform Apply 완료 ✅
               
               리소스 그룹: \`${resourceGroupName}\`
-              POC: \`${{ needs.pre-checking.outputs.poc_name }}\`
+              POC: \`${{ needs.Pre-Check.outputs.poc_name }}\`
               
               인프라 배포가 완료되었습니다.
               
@@ -274,14 +274,14 @@ jobs:
        needs.terraform-apply.result == 'cancelled' || 
        needs.terraform-apply.result == 'skipped') && 
       needs.terraform-apply.outputs.started != 'true' &&
-      needs.pre-checking.outputs.has_poc == 'true'
+      needs.Pre-Check.outputs.has_poc == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Update Summary for Rejection
         run: |
           echo "## 배포 거절 정보" >> $GITHUB_STEP_SUMMARY
-          echo "- 리소스 그룹: **${{ needs.pre-checking.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- POC: **${{ needs.pre-checking.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 리소스 그룹: **${{ needs.Pre-Check.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- POC: **${{ needs.Pre-Check.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ❌ 배포 요청이 거절되었습니다" >> $GITHUB_STEP_SUMMARY
           echo "- 조치: 이슈에 거절 코멘트가 추가되었습니다" >> $GITHUB_STEP_SUMMARY
 
