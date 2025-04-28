@@ -44,7 +44,7 @@ jobs:
             
             // 프로젝트명 추출
             let projectName = null;
-            const projectNameMatch = issue_body.match(/프로젝트명\s*:\s*([^\n]+)/);
+            const projectNameMatch = issue_body.match(/###\s*프로젝트명\s*\n([^\n]+)/);
             if (projectNameMatch && projectNameMatch[1]) {
               projectName = projectNameMatch[1].trim();
             }
