@@ -1,0 +1,326 @@
+name: 'Azure Resource Group Destroy'
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: '처리할 이슈 번호'
+        required: true
+        type: number
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+jobs:
+  # Destroy 작업 사전 확인
+  Destroy-Check:
+    runs-on: ubuntu-latest
+    outputs:
+      resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
+      confirmed: ${{ steps.confirm-destruction.outputs.confirmed }}
+    
+    steps:
+      - name: Get Issue Number
+        id: get-issue-number
+        run: |
+          ISSUE_NUMBER="${{ github.event.inputs.issue_number }}"
+          echo "이슈 번호: ${ISSUE_NUMBER}"
+          echo "issue_number=${ISSUE_NUMBER}" >> $GITHUB_OUTPUT
+    
+      - name: Extract Resource Group from Issue
+        id: get-resource-group
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = ${{ github.event.inputs.issue_number }};
+            const repo = context.repo;
+            
+            // 이슈 상세 정보 가져오기
+            const issue = await github.rest.issues.get({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: issue_number
+            });
+            
+            let resourceGroup = null;
+            const issueBody = issue.data.body;
+            
+            // 새로운 이슈 템플릿 형식에서 리소스 그룹명 추출
+            if (issueBody) {
+              const resourceGroupMatch = issueBody.match(/### 리소스_그룹명\s*\n\n([^\n]+)/);
+              if (resourceGroupMatch && resourceGroupMatch[1].trim() !== '') {
+                resourceGroup = resourceGroupMatch[1].trim();
+                console.log(`✅ Found resource group name: ${resourceGroup}`);
+              }
+            }
+            
+            if (!resourceGroup) {
+              core.setFailed('Resource Group name not found in the issue body');
+              return;
+            }
+            
+            console.log(`✅ Resource Group name for destruction: ${resourceGroup}`);
+            core.setOutput('resource_group', resourceGroup);
+      
+      - name: Confirm Destruction Request
+        id: confirm-destruction
+        run: |
+          RESOURCE_GROUP="${{ steps.get-resource-group.outputs.resource_group }}"
+          
+          if [ -z "$RESOURCE_GROUP" ]; then
+            echo "리소스 그룹 이름이 없어 삭제를 진행할 수 없습니다."
+            echo "confirmed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "⚠️ 리소스 그룹 '${RESOURCE_GROUP}'을 삭제할 준비가 되었습니다."
+          echo "confirmed=true" >> $GITHUB_OUTPUT
+      
+      - name: Add Destruction Request Label
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = ${{ github.event.inputs.issue_number }};
+            const repo = context.repo;
+            
+            await github.rest.issues.addLabels({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: issue_number,
+              labels: ['pending-deletion']
+            });
+            
+            console.log('Added pending-deletion label to the issue');
+      
+      - name: Comment Destruction Request
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = ${{ github.event.inputs.issue_number }};
+            const repo = context.repo;
+            const resourceGroup = "${{ steps.get-resource-group.outputs.resource_group }}";
+            
+            await github.rest.issues.createComment({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: issue_number,
+              body: `## 리소스 그룹 삭제 요청 접수 ⚠️
+              
+              리소스 그룹 \`${resourceGroup}\` 삭제 요청이 접수되었습니다.
+              
+              팀장님의 승인 후 삭제가 진행됩니다. 삭제를 취소하려면 이슈에 코멘트를 남겨주세요.`
+            });
+  
+  # 실제 리소스 삭제 작업 (승인 필요)
+  Destroy:
+    needs: Destroy-Check
+    if: needs.Destroy-Check.outputs.confirmed == 'true'
+    environment: 
+      name: production
+      url: ${{ github.server_url }}/${{ github.repository }}/issues/${{ github.event.inputs.issue_number }}
+    runs-on: ubuntu-latest
+    
+    env:
+      ARM_USE_OIDC: true
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      RESOURCE_GROUP: ${{ needs.Destroy-Check.outputs.resource_group }}
+    
+    steps:
+      - name: Mark Deletion Started
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = ${{ github.event.inputs.issue_number }};
+            const repo = context.repo;
+            
+            // 1) 기존 라벨 제거 
+            try {
+              await github.rest.issues.removeLabel({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue_number,
+                name: 'pending-deletion'
+              });
+            } catch (e) {
+              console.log('라벨 제거 중 오류. 이미 제거되었을 수 있음:', e.message);
+            }
+            
+            // 2) 새 라벨 추가
+            await github.rest.issues.addLabels({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: issue_number,
+              labels: ['deletion-in-progress']
+            });
+            
+            // 3) 코멘트 추가
+            await github.rest.issues.createComment({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: issue_number,
+              body: `## 리소스 그룹 삭제 시작 ⚡
+              
+              리소스 그룹 \`${{ needs.Destroy-Check.outputs.resource_group }}\`의 삭제가 시작되었습니다.
+              삭제 작업이 진행 중입니다. 잠시만 기다려주세요.`
+            });
+      
+      - name: 'Az CLI login with OIDC'
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Check Resource Group Existence
+        id: check-rg
+        run: |
+          if az group exists --name "${{ env.RESOURCE_GROUP }}" | grep -q "true"; then
+            echo "리소스 그룹 '${{ env.RESOURCE_GROUP }}'이(가) 존재함을 확인했습니다."
+            echo "exists=true" >> $GITHUB_OUTPUT
+            
+            # 리소스 그룹에 속한 리소스 목록 출력 (선택적)
+            echo "리소스 그룹 내 리소스 목록:"
+            az resource list --resource-group "${{ env.RESOURCE_GROUP }}" --query "[].{name:name, type:type}" -o table
+          else
+            echo "리소스 그룹 '${{ env.RESOURCE_GROUP }}'이(가) 존재하지 않습니다!"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Delete Resource Group
+        id: delete-rg
+        if: steps.check-rg.outputs.exists == 'true'
+        run: |
+          echo "리소스 그룹 '${{ env.RESOURCE_GROUP }}' 삭제 중..."
+          
+          # 진행 상황을 표시하는 진행 안내 시작
+          echo "이 작업은 몇 분 정도 걸릴 수 있습니다."
+          
+          # 리소스 그룹 삭제 (--no-wait 옵션 없이 실행하여 완료될 때까지 대기)
+          if az group delete --name "${{ env.RESOURCE_GROUP }}" --yes; then
+            echo "✅ 리소스 그룹 삭제 완료"
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ 리소스 그룹 삭제 실패"
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # 실제로 삭제되었는지 한 번 더 확인
+          if az group exists --name "${{ env.RESOURCE_GROUP }}" | grep -q "false"; then
+            echo "✅ 리소스 그룹이 성공적으로 삭제되었음을 확인했습니다."
+          else
+            echo "⚠️ 리소스 그룹이 아직 존재합니다. 삭제 중이거나 문제가 발생했을 수 있습니다."
+          fi
+      
+      - name: Handle Non-Existent Resource Group
+        if: steps.check-rg.outputs.exists == 'false'
+        run: |
+          echo "⚠️ 요청한 리소스 그룹 '${{ env.RESOURCE_GROUP }}'이(가) 존재하지 않아 삭제할 수 없습니다."
+          echo "## 리소스 그룹 존재하지 않음" >> $GITHUB_STEP_SUMMARY
+          echo "- 리소스 그룹: **${{ env.RESOURCE_GROUP }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ⚠️ 이미 삭제되었거나 존재하지 않음" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Notify Completion
+        uses: actions/github-script@v6
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = ${{ github.event.inputs.issue_number }};
+            const repo = context.repo;
+            const resourceGroup = "${{ env.RESOURCE_GROUP }}";
+            const exists = "${{ steps.check-rg.outputs.exists }}" === "true";
+            const success = "${{ steps.delete-rg.outputs.success }}" === "true";
+            
+            // 1) 기존 라벨 제거
+            try {
+              await github.rest.issues.removeLabel({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue_number,
+                name: 'deletion-in-progress'
+              });
+            } catch (e) {
+              console.log('라벨 제거 중 오류. 이미 제거되었을 수 있음:', e.message);
+            }
+            
+            // 2) 상태에 따라 라벨 추가 및 코멘트 추가
+            if (!exists) {
+              // 리소스 그룹이 존재하지 않는 경우
+              await github.rest.issues.addLabels({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue_number,
+                labels: ['no-resource-found']
+              });
+              
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue_number,
+                body: `## 리소스 그룹 존재하지 않음 ⚠️
+                
+                요청하신 리소스 그룹 \`${resourceGroup}\`을(를) 찾을 수 없습니다.
+                이미 삭제되었거나 존재하지 않는 리소스 그룹입니다.`
+              });
+            } else if (success) {
+              // 리소스 그룹 삭제 성공
+              await github.rest.issues.addLabels({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue_number,
+                labels: ['deletion-completed']
+              });
+              
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue_number,
+                body: `## 리소스 그룹 삭제 완료 ✅
+                
+                리소스 그룹 \`${resourceGroup}\`이(가) 성공적으로 삭제되었습니다.`
+              });
+            } else {
+              // 리소스 그룹 삭제 실패
+              await github.rest.issues.addLabels({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue_number,
+                labels: ['deletion-failed']
+              });
+              
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue_number,
+                body: `## 리소스 그룹 삭제 실패 ❌
+                
+                리소스 그룹 \`${resourceGroup}\` 삭제 중 오류가 발생했습니다.
+                워크플로우 로그를 확인하여 자세한 오류 내용을 확인해주세요.`
+              });
+            }
+      
+      - name: Final Summary
+        run: |
+          echo "## 리소스 그룹 삭제 요약" >> $GITHUB_STEP_SUMMARY
+          echo "- 리소스 그룹: **${{ env.RESOURCE_GROUP }}**" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.check-rg.outputs.exists }}" = "true" ]; then
+            if [ "${{ steps.delete-rg.outputs.success }}" = "true" ]; then
+              echo "- 상태: ✅ 성공적으로 삭제됨" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- 상태: ❌ 삭제 실패" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "- 상태: ⚠️ 리소스 그룹이 존재하지 않음" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "- 완료 시간: $(date)" >> $GITHUB_STEP_SUMMARY
