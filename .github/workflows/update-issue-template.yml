@@ -1,0 +1,52 @@
+name: Test:add project to Issue Form
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_name:
+        description: '드롭다운에 넣을 프로젝트명'
+        required: true
+        type: string
+
+jobs:
+  update-template:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write            # push 권한
+
+    steps:
+      # 1) yq(Go) 설치
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      # 2) 레포 체크아웃
+      - uses: actions/checkout@v4
+
+      # 3) YAML 직접 수정
+      - name: Add project to dropdown
+        env:
+          FILE: .github/ISSUE_TEMPLATE/resource_apply.yaml
+          PROJECT: ${{ github.event.inputs.project_name }}
+        run: |
+          yq eval '
+            (.body[] | select(.id == "existing-project") | .attributes.options)
+            |= (. + [env(PROJECT)])       # 배열 뒤에 추가
+            | (.body[] | select(.id == "existing-project") | .attributes.options)
+            |= unique                     # 중복 제거
+          ' -i "$FILE"
+
+      # 4) 커밋 & 푸시 (변경 있을 때만)
+      - name: Commit & push changes
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$FILE"
+          if git diff --cached --quiet; then
+            echo "No update needed—template already had $PROJECT"
+          else
+            git commit -m "chore: add $PROJECT to Issue Form dropdown"
+            git push origin ${{ github.ref }}
+          fi
