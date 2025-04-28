@@ -1,7 +1,7 @@
-name: 리소스 요청서
+name: 리소스 그룹 배포 요청
 description: 새로운 리소스 그룹 배포 또는 기존 리소스 그룹 업데이트 요청
-title: "[Apply] "
-labels: ["Pending Review"]
+title: "[POC-INIT] "
+labels: ["resource_group"]
 assignees: []
 body:
   - type: markdown
@@ -29,6 +29,9 @@ body:
       placeholder: 예시) project-a
     validations:
       required: false
+    dependencies:
+      - question: request-type
+        value: 신규 프로젝트 생성
 
   - type: dropdown
     id: existing-project
@@ -40,6 +43,9 @@ body:
         # 프로젝트 목록은 여기에 추가됩니다. GitHub Actions 워크플로우를 통해 이 파일이 업데이트됩니다.
     validations:
       required: false
+    dependencies:
+      - question: request-type
+        value: 기존 프로젝트 업데이트
 
   - type: markdown
     attributes:
