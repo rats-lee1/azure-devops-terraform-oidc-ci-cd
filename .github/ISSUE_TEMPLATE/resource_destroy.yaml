@@ -17,7 +17,7 @@ body:
       label: 프로젝트명
       description: 관련 프로젝트를 선택하세요
       options:
-        - Project A
+        - 서브원 POC
         - Project B
         - Project C
         - Project D
