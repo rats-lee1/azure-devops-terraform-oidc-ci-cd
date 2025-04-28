@@ -38,7 +38,7 @@ jobs:
               repo: repo.repo,
               issue_number: issue_number
             });
-            
+            console.log(`이슈로그 : ${issue}`);
             const issue_body = issue.data.body;
             
             // 프로젝트명 추출
