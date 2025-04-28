@@ -221,13 +221,16 @@ jobs:
             const issue_number = ${{ github.event.inputs.issue_number }};
             const resourceGroupName = "${{ needs.Pre-Check.outputs.resource_group }}";
             const subscriptionId = "${{ secrets.AZURE_SUBSCRIPTION_ID }}";
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
             
             // Azure 포털 링크 생성
             const portalLink = `https://portal.azure.com/#@/resource/subscriptions/${subscriptionId}/resourceGroups/${resourceGroupName}/overview`;
             
-            github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+            // 1. 이슈에 코멘트 추가
+            await github.rest.issues.createComment({
+              owner: owner,
+              repo: repo,
               issue_number: issue_number,
               body: `## Terraform Apply 완료 ✅
               
@@ -239,6 +242,37 @@ jobs:
               ### 리소스 그룹 접속
               [Azure 포털에서 리소스 그룹 보기](${portalLink})`
             });
+            
+            // 2. 모든 라벨 제거
+            try {
+              // 현재 이슈의 모든 라벨 조회
+              const issueData = await github.rest.issues.get({
+                owner, repo, issue_number
+              });
+              
+              // 이슈에 달려있는 모든 라벨 제거
+              if (issueData.data.labels && issueData.data.labels.length > 0) {
+                for (const label of issueData.data.labels) {
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number,
+                    name: label.name
+                  });
+                }
+                console.log("모든 라벨이 제거되었습니다.");
+              } else {
+                console.log("제거할 라벨이 없습니다.");
+              }
+              
+              // 3. "Completed" 라벨 추가
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number,
+                labels: ['Completed']
+              });
+              console.log("Completed 라벨이 추가되었습니다.");
+              
+            } catch (e) {
+              console.log("라벨 업데이트 중 오류 발생:", e.message);
+            }
 
   handle-rejection:
     needs: [Pre-Check, terraform-plan, terraform-apply]
