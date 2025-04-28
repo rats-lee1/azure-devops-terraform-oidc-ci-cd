@@ -64,7 +64,7 @@ jobs:
           script: |
             const issue_number = ${{ github.event.inputs.issue_number }};
             const repo = context.repo;
-            const projectName = "${{ needs.Destroy-Check.outputs.project_name }}";  # 프로젝트명 가져오기
+            const projectName = "${{ steps.get-issue-info.outputs.project_name }}"; // 프로젝트명 가져오기
             
             await github.rest.issues.createComment({
               owner: repo.owner,
@@ -75,7 +75,7 @@ jobs:
               프로젝트 \`${projectName}\` 삭제 요청이 접수되었습니다.
               
               팀장님의 승인 후 삭제가 진행됩니다. 삭제를 취소하려면 이슈에 코멘트를 남겨주세요.`
-            });    
+            });
 
       - name: Add Destruction Request Label
         uses: actions/github-script@v6
