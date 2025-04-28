@@ -61,7 +61,6 @@ jobs:
     
       - name: Call Pre-Check Workflow
         uses: ./.github/workflows/Pre-Check.yml
-        id: pre-check
         with:
           issue_number: ${{ github.event.inputs.issue_number }}
         secrets:
