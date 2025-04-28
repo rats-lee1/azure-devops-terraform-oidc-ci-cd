@@ -174,31 +174,25 @@ jobs:
       - name: Setup Terraform Backend
         id: setup-backend
         run: |
-          # 프로젝트 구조 확인
-          if [ -f "backend.tf" ]; then
-            BACKEND_FILE="backend.tf"
-          elif [ -f "terraform/backend.tf" ]; then
-            BACKEND_FILE="terraform/backend.tf"
-          else
-            echo "⚠️ backend.tf 파일을 찾을 수 없습니다. 프로젝트 구조를 확인해주세요."
-            exit 1
-          fi
-          
           # 프로젝트 이름 확인
           PROJECT_NAME="${{ env.PROJECT_NAME }}"
           echo "프로젝트 이름: $PROJECT_NAME"
           
-          # 백엔드 파일의 내용 확인 및 필요시 수정
-          echo "기존 백엔드 파일 내용:"
-          cat "$BACKEND_FILE"
+          # 백엔드 파일 생성
+          echo "백엔드 파일을 생성합니다..."
+          cat > backend.tf << EOF
+          terraform {
+            backend "azurerm" {
+              resource_group_name  = "terraform-state-rg"
+              storage_account_name = "tfstatebithumbdev"
+              container_name       = "tfstate"
+              key                  = "projects/${PROJECT_NAME}/terraform.tfstate"
+            }
+          }
+          EOF
           
-          # 프로젝트 이름 변수가 있는지 확인하고 실제 값으로 대체
-          if grep -q "\${PROJECT_NAME}" "$BACKEND_FILE"; then
-            echo "백엔드 파일에서 \${PROJECT_NAME} 변수를 실제 값으로 대체합니다..."
-            sed -i "s|\${PROJECT_NAME}|$PROJECT_NAME|g" "$BACKEND_FILE"
-            echo "수정된 백엔드 파일 내용:"
-            cat "$BACKEND_FILE"
-          fi
+          echo "생성된 백엔드 파일 내용:"
+          cat backend.tf
 
       - name: Initialize Terraform to access state
         id: terraform-init
