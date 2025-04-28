@@ -56,7 +56,27 @@ jobs:
             
             console.log(`✅ 프로젝트명: ${projectName}`);
             core.setOutput('project_name', projectName);
-          
+
+      - name: Comment Destruction Request
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = ${{ github.event.inputs.issue_number }};
+            const repo = context.repo;
+            const projectName = "${{ needs.Destroy-Check.outputs.project_name }}";  # 프로젝트명 가져오기
+            
+            await github.rest.issues.createComment({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: issue_number,
+              body: `## 프로젝트 삭제 요청 접수 ⚠️
+              
+              프로젝트 \`${projectName}\` 삭제 요청이 접수되었습니다.
+              
+              팀장님의 승인 후 삭제가 진행됩니다. 삭제를 취소하려면 이슈에 코멘트를 남겨주세요.`
+            });    
+
       - name: Add Destruction Request Label
         uses: actions/github-script@v6
         with:
@@ -79,7 +99,7 @@ jobs:
   # 실제 리소스 삭제 작업 (승인 필요)
   Destroy:
     needs: Destroy-Check
-    if: needs.Destroy-Check.outputs.confirmed == 'true'
+    # if: needs.Destroy-Check.outputs.confirmed == 'true'
     environment: 
       name: production
       url: ${{ github.server_url }}/${{ github.repository }}/issues/${{ github.event.inputs.issue_number }}
@@ -94,25 +114,7 @@ jobs:
       PROJECT_NAME: ${{ needs.Destroy-Check.outputs.project_name }}
     
     steps:
-      - name: Comment Destruction Request
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const issue_number = ${{ github.event.inputs.issue_number }};
-            const repo = context.repo;
-            const projectName = "${{ needs.Destroy-Check.outputs.project_name }}";  # 프로젝트명 가져오기
-            
-            await github.rest.issues.createComment({
-              owner: repo.owner,
-              repo: repo.repo,
-              issue_number: issue_number,
-              body: `## 프로젝트 삭제 요청 접수 ⚠️
-              
-              프로젝트 \`${projectName}\` 삭제 요청이 접수되었습니다.
-              
-              팀장님의 승인 후 삭제가 진행됩니다. 삭제를 취소하려면 이슈에 코멘트를 남겨주세요.`
-            });
+
       - name: Mark Deletion Started
         uses: actions/github-script@v6
         with:
