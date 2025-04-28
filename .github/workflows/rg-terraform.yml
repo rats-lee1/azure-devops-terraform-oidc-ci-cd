@@ -24,10 +24,8 @@ jobs:
   terraform-plan:
     needs: Pre-Check
     runs-on: ubuntu-latest
-    # POC 정보가 있는 경우에만 진행
-    if: >
-      needs.Pre-Check.outputs.has_poc == 'true' &&
-      needs.Pre-Check.outputs.resource_group_exists == 'false'
+    # 리소스 그룹이 존재하지 않는 경우에만 진행
+    if: needs.Pre-Check.outputs.resource_group_exists == 'false'
     
     env:
       ARM_USE_OIDC: true
@@ -35,7 +33,7 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_resource_group_name: ${{ needs.Pre-Check.outputs.resource_group }}
-      POC_NAME: ${{ needs.Pre-Check.outputs.poc_name }}
+      PROJECT_NAME: ${{ needs.Pre-Check.outputs.project_name }}
     
     steps:
       - uses: actions/checkout@v3
@@ -62,7 +60,8 @@ jobs:
           fi
           echo "✅ All secrets are set"
           echo "secrets_status=$SECRETS_STATUS" >> $GITHUB_OUTPUT
-      - name: 'POC별 백엔드 구성 생성'
+      
+      - name: '프로젝트별 백엔드 구성 생성'
         run: |
           # main.tf에서 백엔드 구성 제거 필요
           # 대신 동적으로 backend.tf 생성
@@ -72,13 +71,14 @@ jobs:
               resource_group_name  = "terraform-state-rg"
               storage_account_name = "tfstatebithumbdev"
               container_name       = "tfstate"
-              key                  = "poc/${POC_NAME}/terraform.tfstate"
+              key                  = "projects/${PROJECT_NAME}/terraform.tfstate"
             }
           }
           EOF
           
-          echo "백엔드 구성 파일 생성 완료 (POC: ${POC_NAME})"
+          echo "백엔드 구성 파일 생성 완료 (프로젝트: ${PROJECT_NAME})"
           cat backend.tf
+      
       - name: 'Az CLI login with OIDC'
         id: azure-login
         uses: azure/login@v1
@@ -105,7 +105,7 @@ jobs:
           # 요약 추가
           echo "## Terraform Plan 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
-          echo "- POC: **${{ needs.Pre-Check.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 프로젝트: **${PROJECT_NAME}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ Plan 완료" >> $GITHUB_STEP_SUMMARY
       
       - name: Upload Terraform Plan
@@ -128,22 +128,22 @@ jobs:
               body: `## Terraform Plan 완료 ✅
               
               리소스 그룹: \`${{ needs.Pre-Check.outputs.resource_group }}\`
-              POC: \`${{ needs.Pre-Check.outputs.poc_name }}\`
+              프로젝트: \`${{ needs.Pre-Check.outputs.project_name }}\`
               
               Plan이 완료되었습니다. 팀장님의 승인 후 Apply가 진행됩니다.`
             });
 
-  handle-missing-poc:
+  handle-resource-conflict:
     needs: Pre-Check
-    if: needs.Pre-Check.outputs.has_poc == 'false'
+    if: needs.Pre-Check.outputs.resource_group_exists == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Update Summary for Missing POC
+      - name: Update Summary for Resource Group Conflict
         run: |
-          echo "## 작업 중단 - POC 정보 누락" >> $GITHUB_STEP_SUMMARY
+          echo "## 작업 중단 - 리소스 그룹 충돌" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${{ needs.Pre-Check.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- 상태: ❌ POC 정보가 누락되어 배포가 중단되었습니다" >> $GITHUB_STEP_SUMMARY
-          echo "- 조치: POC 라벨을 추가한 후 다시 시도해주세요." >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ❌ 리소스 그룹이 이미 존재하여 배포가 중단되었습니다" >> $GITHUB_STEP_SUMMARY
+          echo "- 조치: 다른 리소스 그룹 이름을 사용하거나 기존 리소스 그룹을 재사용하려면 이슈를 수정해주세요." >> $GITHUB_STEP_SUMMARY
 
       - name: Remove Resource Group Label
         uses: actions/github-script@v6
@@ -165,8 +165,8 @@ jobs:
   terraform-apply:
     needs: [Pre-Check, terraform-plan]
     runs-on: ubuntu-latest
-    # POC 정보가 있는 경우에만 진행
-    if: needs.Pre-Check.outputs.has_poc == 'true'
+    # 리소스 그룹이 존재하지 않는 경우에만 진행
+    if: needs.Pre-Check.outputs.resource_group_exists == 'false'
     environment: 
       name: production
       url: ${{ github.server_url }}/${{ github.repository }}/issues/${{ github.event.issue.number }}
@@ -227,7 +227,7 @@ jobs:
           # 요약 시작
           echo "## Terraform Apply 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
-          echo "- POC: **${{ needs.Pre-Check.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 프로젝트: **${{ needs.Pre-Check.outputs.project_name }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 성공적으로 배포됨" >> $GITHUB_STEP_SUMMARY
           
           # 리소스 목록 출력 (선택적)
@@ -256,7 +256,7 @@ jobs:
               body: `## Terraform Apply 완료 ✅
               
               리소스 그룹: \`${resourceGroupName}\`
-              POC: \`${{ needs.Pre-Check.outputs.poc_name }}\`
+              프로젝트: \`${{ needs.Pre-Check.outputs.project_name }}\`
               
               인프라 배포가 완료되었습니다.
               
@@ -274,14 +274,14 @@ jobs:
        needs.terraform-apply.result == 'cancelled' || 
        needs.terraform-apply.result == 'skipped') && 
       needs.terraform-apply.outputs.started != 'true' &&
-      needs.Pre-Check.outputs.has_poc == 'true'
+      needs.Pre-Check.outputs.resource_group_exists == 'false'
     runs-on: ubuntu-latest
     steps:
       - name: Update Summary for Rejection
         run: |
           echo "## 배포 거절 정보" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${{ needs.Pre-Check.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- POC: **${{ needs.Pre-Check.outputs.poc_name }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 프로젝트: **${{ needs.Pre-Check.outputs.project_name }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ❌ 배포 요청이 거절되었습니다" >> $GITHUB_STEP_SUMMARY
           echo "- 조치: 이슈에 거절 코멘트가 추가되었습니다" >> $GITHUB_STEP_SUMMARY
 

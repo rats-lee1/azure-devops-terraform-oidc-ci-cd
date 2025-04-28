@@ -11,12 +11,9 @@ on:
       resource_group:
         description: '추출된 리소스 그룹 이름'
         value: ${{ jobs.Pre-Check.outputs.resource_group }}
-      poc_name:
-        description: '추출된 POC 이름'
-        value: ${{ jobs.Pre-Check.outputs.poc_name }}
-      has_poc:
-        description: 'POC 정보 존재 여부'
-        value: ${{ jobs.Pre-Check.outputs.has_poc }}
+      project_name:
+        description: '프로젝트 이름'
+        value: ${{ jobs.Pre-Check.outputs.project_name }}
       resource_group_exists:  
         description: '리소스 그룹 존재 여부'
         value: ${{ jobs.Pre-Check.outputs.resource_group_exists }}
@@ -36,11 +33,92 @@ jobs:
 
     outputs:
       resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
-      poc_name: ${{ steps.extract-poc-info.outputs.poc_name }}
-      has_poc: ${{ steps.extract-poc-info.outputs.has_poc }}
       resource_group_exists: ${{ steps.check-resource-group-exists.outputs.exists }}
+      project_name: ${{ steps.extract-project-info.outputs.project_name }}
     
     steps:
+      - name: Extract Project Information from Issue
+        id: extract-project-info
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            // workflow_call에서 전달받은 issue_number 사용
+            const issue_number = ${{ inputs.issue_number }};
+            const repo = context.repo;
+            
+            // 이슈 상세 정보 가져오기
+            const issue = await github.rest.issues.get({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: issue_number
+            });
+            
+            let projectName = null;
+            const issueBody = issue.data.body;
+            
+            // 이슈 본문에서 요청 유형과 프로젝트명 추출
+            if (issueBody) {
+              // 요청 유형 확인
+              const requestTypeMatch = issueBody.match(/### 요청 유형\s*\n\n([^\n]+)/);
+              const requestType = requestTypeMatch ? requestTypeMatch[1].trim() : null;
+              console.log(`요청 유형: ${requestType}`);
+              
+              if (requestType === '신규 프로젝트 생성') {
+                // 신규 프로젝트 생성인 경우 프로젝트명 필드에서 추출
+                const projectNameMatch = issueBody.match(/### 프로젝트명\s*\n\n([^\n]+)/);
+                if (projectNameMatch && projectNameMatch[1].trim() !== '') {
+                  projectName = projectNameMatch[1].trim();
+                  console.log(`✅ 신규 프로젝트명: ${projectName}`);
+                } else {
+                  console.log('⚠️ 신규 프로젝트 생성이지만 프로젝트명이 입력되지 않았습니다.');
+                  
+                  // 오류를 이슈에 코멘트로 추가
+                  try {
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue_number,
+                      body: `### ❌ 프로젝트명 누락\n\n신규 프로젝트 생성을 선택하셨지만 프로젝트명이 입력되지 않았습니다. 프로젝트명을 입력해주세요.`
+                    });
+                  } catch (commentError) {
+                    console.error('코멘트 추가 중 오류 발생:', commentError.message);
+                  }
+                }
+              } else if (requestType === '기존 프로젝트 업데이트') {
+                // 기존 프로젝트 업데이트인 경우 기존 프로젝트 선택 필드에서 추출
+                const existingProjectMatch = issueBody.match(/### 기존 프로젝트 선택\s*\n\n([^\n]+)/);
+                if (existingProjectMatch && existingProjectMatch[1].trim() !== '선택하세요') {
+                  projectName = existingProjectMatch[1].trim();
+                  console.log(`✅ 기존 프로젝트명: ${projectName}`);
+                } else {
+                  console.log('⚠️ 기존 프로젝트 업데이트이지만 프로젝트가 선택되지 않았습니다.');
+                  
+                  // 오류를 이슈에 코멘트로 추가
+                  try {
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue_number,
+                      body: `### ❌ 프로젝트 선택 누락\n\n기존 프로젝트 업데이트를 선택하셨지만 프로젝트가 선택되지 않았습니다. 기존 프로젝트를 선택해주세요.`
+                    });
+                  } catch (commentError) {
+                    console.error('코멘트 추가 중 오류 발생:', commentError.message);
+                  }
+                }
+              } else {
+                console.log('⚠️ 요청 유형을 확인할 수 없습니다.');
+              }
+            }
+            
+            if (!projectName) {
+              console.log('⚠️ 프로젝트명을 추출할 수 없습니다.');
+              core.setFailed('프로젝트명을 찾을 수 없습니다.');
+            }
+            
+            console.log(`프로젝트명: ${projectName}`);
+            core.setOutput('project_name', projectName || '');
+
       - name: Extract Resource Group from Issue (Issue Forms)
         id: get-resource-group
         uses: actions/github-script@v6
@@ -61,35 +139,42 @@ jobs:
             let resourceGroup = null;
             const issueBody = issue.data.body;
             
-            // 간소화된 리소스 그룹명 추출 로직
+            // 새로운 이슈 템플릿 형식에서 리소스 그룹명 추출
             if (issueBody) {
-              // 주요 패턴만 검색
-              const mainPatterns = [
-                /###\s+리소스_그룹명\s*([\s\S]*?)(?=###|$)/,
-                /리소스[_\s]그룹명:?\s*([a-zA-Z0-9_-]+)/i,
-                /resource\s+group:?\s*([a-zA-Z0-9_-]+)/i
-              ];
-              
-              // 주요 패턴으로 검색
-              for (const pattern of mainPatterns) {
-                const match = issueBody.match(pattern);
-                if (match && match[1]) {
-                  resourceGroup = match[1].trim();
-                  console.log(`✅ Found resource group name with pattern: ${resourceGroup}`);
-                  break;
-                }
-              }
-              
-              // 패턴 검색으로 찾지 못한 경우, 리소스 그룹 형식의 줄 찾기
-              if (!resourceGroup) {
-                const lines = issueBody.split('\n');
-                for (const line of lines) {
-                  const trimmedLine = line.trim();
-                  // 리소스 그룹 명명 규칙에 맞는 줄 찾기 (공백 없고 적절한 문자로 구성)
-                  if (/^[a-zA-Z0-9][a-zA-Z0-9_-]{2,62}$/.test(trimmedLine)) {
-                    resourceGroup = trimmedLine;
-                    console.log(`✅ Found potential resource group name: ${resourceGroup}`);
+              // 새 이슈 템플릿의 리소스 그룹명 필드 (resource-group-name)
+              const resourceGroupMatch = issueBody.match(/### 리소스_그룹명\s*\n\n([^\n]+)/);
+              if (resourceGroupMatch && resourceGroupMatch[1].trim() !== '') {
+                resourceGroup = resourceGroupMatch[1].trim();
+                console.log(`✅ Found resource group name from new template: ${resourceGroup}`);
+              } else {
+                // 이전 방식 시도 (이전 템플릿 지원을 위해 유지)
+                const mainPatterns = [
+                  /###\s+리소스_그룹명\s*([\s\S]*?)(?=###|$)/,
+                  /리소스[_\s]그룹명:?\s*([a-zA-Z0-9_-]+)/i,
+                  /resource\s+group:?\s*([a-zA-Z0-9_-]+)/i
+                ];
+                
+                // 주요 패턴으로 검색
+                for (const pattern of mainPatterns) {
+                  const match = issueBody.match(pattern);
+                  if (match && match[1]) {
+                    resourceGroup = match[1].trim();
+                    console.log(`✅ Found resource group name with pattern: ${resourceGroup}`);
                     break;
+                  }
+                }
+                
+                // 패턴 검색으로 찾지 못한 경우, 리소스 그룹 형식의 줄 찾기
+                if (!resourceGroup) {
+                  const lines = issueBody.split('\n');
+                  for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    // 리소스 그룹 명명 규칙에 맞는 줄 찾기 (공백 없고 적절한 문자로 구성)
+                    if (/^[a-zA-Z0-9][a-zA-Z0-9_-]{2,62}$/.test(trimmedLine)) {
+                      resourceGroup = trimmedLine;
+                      console.log(`✅ Found potential resource group name: ${resourceGroup}`);
+                      break;
+                    }
                   }
                 }
               }
@@ -129,98 +214,7 @@ jobs:
             console.log(`✅ Resource Group name: ${resourceGroup}`);
             core.setOutput('resource_group', resourceGroup);
 
-      - name: Extract POC from Labels
-        id: extract-poc-info
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GH_TOKEN }}
-          script: |
-            // workflow_call에서 전달받은 issue_number 사용
-            const issue_number = ${{ inputs.issue_number }};
-            console.log(`이슈 #${issue_number} POC 정보 추출 중`);
-            
-            try {
-              // 이슈 정보 가져오기
-              const issue = await github.rest.issues.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issue_number
-              });
-              
-              // 이슈 라벨 확인
-              const labels = issue.data.labels || [];
-              console.log(`이슈에 총 ${labels.length}개의 라벨이 있습니다.`);
-              
-              // POC 라벨 찾기 (POC: 로 시작하는 라벨)
-              const pocLabels = labels.filter(label => {
-                const labelName = label.name || '';
-                return labelName.startsWith('POC:');
-              });
-              
-              console.log(`${pocLabels.length}개의 POC 라벨이 발견되었습니다.`);
-              
-              let hasPOC = false;
-              let pocName = '';
-              
-              if (pocLabels.length > 0) {
-                // POC 라벨 정보 추출
-                const pocInfo = pocLabels.map(label => {
-                  const labelName = label.name;
-                  const pocName = labelName.substring(4).trim(); // "POC:" 부분 제거
-                  return {
-                    fullLabel: labelName,
-                    pocName: pocName,
-                    color: label.color
-                  };
-                });
-                
-                console.log('발견된 POC 정보:', JSON.stringify(pocInfo, null, 2));
-                
-                hasPOC = true;
-                pocName = pocInfo[0].pocName; // 첫 번째 POC 이름 사용
-              } else {
-                console.log('이 이슈에는 POC 라벨이 없습니다.');
-                hasPOC = false;
-                
-                // POC가 없다는 경고 메시지를 이슈에 댓글로 추가 (중복 검사 없이)
-                try {
-                  const warningMessage = `### ⚠️ 프로젝트 정보 누락\n\n이 이슈에 POC 정보가 없습니다. 적절한 POC 라벨(\`POC:이름\`)을 추가해주세요.`;
-                  
-                  // 새 경고 코멘트 작성 (중복 검사 제거)
-                  await github.rest.issues.createComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: issue_number,
-                    body: warningMessage
-                  });
-                  console.log('POC 정보 누락 경고 메시지가 추가되었습니다.');
-                } catch (commentError) {
-                  console.error('경고 코멘트 추가 중 오류 발생:', commentError.message);
-                }
-              }
-              
-              // 출력 설정
-              core.setOutput('has_poc', hasPOC.toString());
-              core.setOutput('poc_name', pocName);
-              
-            } catch (error) {
-              console.error('POC 정보 추출 중 오류 발생:', error.message);
-              core.setOutput('has_poc', 'false');
-              core.setOutput('poc_name', '');
-              
-              // 오류 정보를 이슈에 코멘트로 추가
-              try {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issue_number,
-                  body: `### ❌ POC 라벨 추출 중 오류 발생\n\n\`\`\`\n${error.message}\n\`\`\``
-                });
-                console.log('오류 정보가 이슈에 코멘트로 추가되었습니다.');
-              } catch (commentError) {
-                console.error('코멘트 추가 중 추가 오류 발생:', commentError.message);
-              }
-            }
+
       
       - name: 'Az CLI login with OIDC'
         id: azure-login
@@ -284,9 +278,8 @@ jobs:
 
       - name: Add Resource Group Summary
         run: |
-          echo "## 리소스 그룹 및 POC 검증 결과" >> $GITHUB_STEP_SUMMARY
+          echo "## 리소스 그룹 및 프로젝트 검증 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 이슈 번호: #${{ inputs.issue_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 프로젝트명: **${{ steps.extract-project-info.outputs.project_name }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 식별된 리소스 그룹: **${{ steps.get-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹 충돌: **${{ steps.check-resource-group-exists.outputs.exists == 'true' && '⚠️ 충돌 있음' || '✅ 충돌 없음' }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- POC 정보: **${{ steps.extract-poc-info.outputs.has_poc == 'true' && steps.extract-poc-info.outputs.poc_name || '없음' }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- 상태: ✅ 검증 완료" >> $GITHUB_STEP_SUMMARY
