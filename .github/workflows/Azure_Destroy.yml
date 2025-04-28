@@ -38,8 +38,9 @@ jobs:
               repo: repo.repo,
               issue_number: issue_number
             });
-            console.log(`이슈로그 : ${issue}`);
+            
             const issue_body = issue.data.body;
+            console.log(`이슈 바디 : ${issue_body}`);
             
             // 프로젝트명 추출
             let projectName = null;
