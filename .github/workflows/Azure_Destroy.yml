@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       project_name: ${{ steps.get-issue-info.outputs.project_name }}
+      resource_group_name: ${{ steps.get-issue-info.outputs.resource_group_name }}
     
     steps:
       - name: Get Issue Number and Extract Information
@@ -52,7 +53,22 @@ jobs:
               return;
             }
             
+            // 리소스 그룹명 추출
+            let resourceGroupName = null;
+            const resourceGroupMatch = issue_body.match(/###\s*리소스\s*그룹명\s*\n([^\n]+)/);
+            if (resourceGroupMatch && resourceGroupMatch[1]) {
+              resourceGroupName = resourceGroupMatch[1].trim();
+            }
+            
             console.log(`✅ 프로젝트명: ${projectName}`);
+            if (resourceGroupName) {
+              console.log(`✅ 리소스 그룹명: ${resourceGroupName}`);
+              core.setOutput('resource_group_name', resourceGroupName);
+            } else {
+              console.log(`⚠️ 리소스 그룹명 정보 없음, 프로젝트명으로 대체합니다.`);
+              core.setOutput('resource_group_name', projectName);
+            }
+            
             core.setOutput('project_name', projectName);
 
       - name: Comment Destruction Request
@@ -109,6 +125,7 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       PROJECT_NAME: ${{ needs.Destroy-Check.outputs.project_name }}
+      RESOURCE_GROUP_NAME: ${{ needs.Destroy-Check.outputs.resource_group_name }}
     
     steps:
 
@@ -221,7 +238,16 @@ jobs:
           echo "Terraform destroy 명령 실행 중..."
           echo "모든 리소스를 한번에 삭제합니다..."
           
-          if terraform destroy -auto-approve; then
+          # 변수 파일 생성
+          cat > terraform.tfvars << EOF
+          resource_group_name = "${{ env.RESOURCE_GROUP_NAME }}"
+          EOF
+          
+          echo "생성된 변수 파일 내용:"
+          cat terraform.tfvars
+          
+          # 또는 명령줄 변수로 전달
+          if terraform destroy -auto-approve -var="resource_group_name=${{ env.RESOURCE_GROUP_NAME }}"; then
             echo "✅ Terraform destroy 성공적으로 완료되었습니다."
             echo "success=true" >> $GITHUB_OUTPUT
           else
