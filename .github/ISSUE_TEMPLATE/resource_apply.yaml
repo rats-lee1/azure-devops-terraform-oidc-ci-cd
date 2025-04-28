@@ -21,31 +21,32 @@ body:
     validations:
       required: true
 
+  - type: markdown
+    attributes:
+      value: |
+        ### 주의사항
+        - **신규 프로젝트 생성**을 선택한 경우: 아래 '프로젝트명' 필드를 반드시 입력해주세요.
+        - **기존 프로젝트 업데이트**를 선택한 경우: 아래 '기존 프로젝트 선택'에서 프로젝트를 선택해주세요.
+
   - type: input
     id: project-name
     attributes:
       label: 프로젝트명
-      description: 신규 프로젝트인 경우 프로젝트명을 입력하세요
+      description: 신규 프로젝트 생성인 경우에만 입력하세요
       placeholder: 예시) project-a
     validations:
       required: false
-    dependencies:
-      - question: request-type
-        value: 신규 프로젝트 생성
 
   - type: dropdown
     id: existing-project
     attributes:
       label: 기존 프로젝트 선택
-      description: 기존 프로젝트 업데이트인 경우 프로젝트를 선택하세요
+      description: 기존 프로젝트 업데이트인 경우에만 선택하세요
       options:
         - 선택하세요
         # 프로젝트 목록은 여기에 추가됩니다. GitHub Actions 워크플로우를 통해 이 파일이 업데이트됩니다.
     validations:
       required: false
-    dependencies:
-      - question: request-type
-        value: 기존 프로젝트 업데이트
 
   - type: markdown
     attributes:
