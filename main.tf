@@ -1,105 +1,101 @@
-terraform {
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = ">=3.0.0"
-    }
-    null = {
-      source  = "hashicorp/null"
-      version = ">=3.0.0"
-    }
-  }
-  # backend "azurerm" {
-  #   # resource_group_name  = "terraform-state-rg"
-  #   # storage_account_name = "tfstatebithumbdev"
-  #   # container_name       = "tfstate"
-  #   # key                  = "terraform/dev/rg_dev_test/terraform.tfstate"
-  # }
-}
-
 provider "azurerm" {
   features {}
 }
 
-# Azure CLI를 통해 모든 리소스 그룹 이름 가져오기 (기존 로직은 유지하지만 조건부로 실행)
-data "external" "resource_groups" {
-  count = var.base_name != "" ? 1 : 0
-  program = [
-    "bash", "-c",
-    <<EOT
-    echo '{"result": "'$(az group list --query "[].name" -o json | base64 -w 0)'"}'
-    EOT
-  ]
+# 변수 정의
+variable "resource_group_name" {
+  description = "배포할 리소스 그룹 이름"
+  type        = string
 }
 
-# 기존 리소스 그룹 목록을 확인하는 로컬 변수
-locals {
-  # 자동 생성 로직 사용 여부 결정
-  use_auto_naming = var.base_name != ""
-  
-  # 자동 생성 로직을 사용할 경우만 아래 로직 실행
-  decoded_json    = local.use_auto_naming ? base64decode(data.external.resource_groups[0].result.result) : "[]"
-  existing_rg_names = local.use_auto_naming ? jsondecode(local.decoded_json) : []
-  
-  # 기본 이름으로 시작하는 리소스 그룹 필터링
-  base_rg_name = local.use_auto_naming ? var.base_name : ""
-  
-  matching_rgs = local.use_auto_naming ? [
-    for name in local.existing_rg_names : 
-    name if length(regexall("^${local.base_rg_name}(-[0-9]+)?$", name)) > 0
-  ] : []
-  
-  # 숫자 접미사가 있는 리소스 그룹들만 필터링
-  numbered_rgs = local.use_auto_naming ? [
-    for name in local.matching_rgs : 
-    tonumber(replace(name, "${local.base_rg_name}-", ""))
-    if length(regexall("^${local.base_rg_name}-[0-9]+$", name)) > 0
-  ] : []
-  
-  # 최대 번호 찾기
-  max_number = local.use_auto_naming && length(local.numbered_rgs) > 0 ? max(local.numbered_rgs...) + 1 : 1
-  
-  # 최종 리소스 그룹 이름 결정
-  # 1. use_auto_naming이 true이고 기본 이름이 이미 존재하면 숫자 접미사 붙이기
-  # 2. use_auto_naming이 true이지만 기본 이름이 존재하지 않으면 기본 이름 사용
-  # 3. use_auto_naming이 아니면 워크플로우에서 받은 resource_group_name 사용
-  final_rg_name = local.use_auto_naming ? (
-    contains(local.existing_rg_names, local.base_rg_name) ? 
-    "${local.base_rg_name}-${local.max_number}" : local.base_rg_name
-  ) : var.resource_group_name
+variable "user_list" {
+  description = "접근 권한을 부여할 사용자 목록"
+  type        = list(string)
+  default     = []
+}
+
+variable "gpu_size" {
+  description = "필요한 GPU 크기"
+  type        = string
+  default     = "해당 없음"
+}
+
+variable "environment" {
+  description = "배포 환경"
+  type        = string
+  default     = "개발(Development)"
 }
 
 # 리소스 그룹 생성
-resource "azurerm_resource_group" "example" {
-  name     = local.final_rg_name
-  location = var.location
+resource "azurerm_resource_group" "main" {
+  name     = var.resource_group_name
+  location = "Korea Central"
   
   tags = {
-    environment = "test"
-    deployed_by = "terraform-oidc"
-    created_at  = formatdate("YYYY-MM-DD", timestamp())
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Project     = replace(var.resource_group_name, "rg-", "")
   }
 }
 
-# 디버깅용 출력
-output "existing_resource_groups" {
-  value = local.use_auto_naming ? local.existing_rg_names : ["Auto-naming disabled"]
+# =====================================================
+# RBAC (사용자 권한 관리) 로직
+# =====================================================
+
+# 사용자 이메일 추출
+locals {
+  user_emails = [for user in var.user_list : split(":", user)[1]]
+  
+  # GPU 크기별 할당량 매핑
+  gpu_quotas = {
+    "Tiny"    = 4
+    "Small"   = 8
+    "Medium"  = 16
+    "Large"   = 24
+    "XLarge"  = 32
+    "해당 없음" = 0
+  }
+  gpu_quota = lookup(local.gpu_quotas, var.gpu_size, 0)
 }
 
-output "matching_resource_groups" {
-  value = local.use_auto_naming ? local.matching_rgs : ["Auto-naming disabled"]
+# 사용자별 역할 할당
+resource "azurerm_role_assignment" "user_contributor" {
+  for_each             = toset(local.user_emails)
+  scope                = azurerm_resource_group.main.id
+  role_definition_name = "Contributor"
+  principal_id         = each.value
 }
 
-output "numbered_resource_groups" {
-  value = local.use_auto_naming ? local.numbered_rgs : ["Auto-naming disabled"]
+# =====================================================
+# GPU 정책 설정 로직
+# =====================================================
+
+# GPU 할당량 정책 설정
+resource "azurerm_policy_assignment" "gpu_quota" {
+  count                = local.gpu_quota > 0 ? 1 : 0
+  name                 = "gpu-quota-policy"
+  scope                = azurerm_resource_group.main.id
+  policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/5c99bc60-3bcd-475f-b420-5a4abe6eaec4" # 가상 정책 ID (실제 ID로 대체 필요)
+  parameters           = jsonencode({
+    gpuQuotaValue = {
+      value = local.gpu_quota
+    }
+  })
 }
 
-output "max_number" {
-  value = local.max_number
+# 출력값 정의
+output "resource_group_id" {
+  value = azurerm_resource_group.main.id
 }
 
-# 생성된 리소스 그룹 이름 출력
 output "resource_group_name" {
-  value = azurerm_resource_group.example.name
-  description = "생성된 리소스 그룹의 이름"
+  value = azurerm_resource_group.main.name
+}
+
+output "assigned_users" {
+  value = local.user_emails
+}
+
+output "gpu_quota" {
+  value = local.gpu_quota
 }
