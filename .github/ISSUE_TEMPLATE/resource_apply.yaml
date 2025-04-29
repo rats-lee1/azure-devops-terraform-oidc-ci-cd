@@ -121,7 +121,7 @@ body:
     id: gpu-size
     attributes:
       label: GPU 사용 구성
-      description: 필요한 GPU 리소스 구성을 선택하세요 (팀 전체 할당량: H100 타입 VM 4대, 총 32개 GPU)
+      description: 필요한 GPU 리소스 구성을 선택하세요
       options:
         - 해당 없음
         - Tiny (4 GPU)
