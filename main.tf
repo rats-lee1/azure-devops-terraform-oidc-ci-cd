@@ -43,18 +43,22 @@ resource "azurerm_role_assignment" "user_contributor" {
 }
 
 # =====================================================
-# GPU 정책 설정 로직
+# GPU 정책 설정 로직 (메타데이터 태그 방식으로 변경)
 # =====================================================
 
-# GPU 할당량 정책 설정
-resource "azurerm_policy_assignment" "gpu_quota" {
-  count                = local.gpu_quota > 0 ? 1 : 0
-  name                 = "gpu-quota-policy"
-  scope                = azurerm_resource_group.main.id
-  policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/5c99bc60-3bcd-475f-b420-5a4abe6eaec4" # 가상 정책 ID (실제 ID로 대체 필요)
-  parameters           = jsonencode({
-    gpuQuotaValue = {
-      value = local.gpu_quota
+# GPU 할당량을 리소스 그룹 태그로 설정 (정책 대신)
+resource "azurerm_resource_group_policy_assignment" "gpu_quota" {
+  count               = local.gpu_quota > 0 ? 1 : 0
+  name                = "gpu-quota-policy"
+  resource_group_id   = azurerm_resource_group.main.id
+  policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/0a914e76-4921-4c19-b460-a2d36003525a" # 실제 정책 ID로 교체
+  
+  parameters = jsonencode({
+    "tagName": {
+      "value": "GPUQuota"
+    },
+    "tagValue": {
+      "value": "${local.gpu_quota}"
     }
   })
 }
