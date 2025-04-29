@@ -103,13 +103,12 @@ jobs:
       
       - name: '사용자 RBAC 및 GPU 정책 모듈 확인'
         run: |
-          # 필요한 Terraform 모듈 구조 확인
-          if [ ! -f "modules/rbac/main.tf" ]; then
-            echo "RBAC 모듈이 없습니다. 생성합니다."
-            mkdir -p modules/rbac
-            
-            # RBAC 모듈 생성
-            cat > modules/rbac/main.tf << EOF
+          # modules 디렉토리와 필요한 모듈이 있는지 확인
+          mkdir -p modules/rbac
+          mkdir -p modules/gpu_policy
+          
+          # RBAC 모듈 생성
+          cat > modules/rbac/main.tf << 'EOF'
           variable "resource_group_id" {
             description = "리소스 그룹 ID"
             type        = string
@@ -137,16 +136,11 @@ jobs:
             value = local.user_emails
           }
           EOF
-            
-            echo "RBAC 모듈이 생성되었습니다."
-          fi
           
-          if [ ! -f "modules/gpu_policy/main.tf" ]; then
-            echo "GPU 정책 모듈이 없습니다. 생성합니다."
-            mkdir -p modules/gpu_policy
-            
-            # GPU 정책 모듈 생성
-            cat > modules/gpu_policy/main.tf << EOF
+          echo "RBAC 모듈이 생성되었습니다."
+          
+          # GPU 정책 모듈 생성
+          cat > modules/gpu_policy/main.tf << 'EOF'
           variable "resource_group_id" {
             description = "리소스 그룹 ID"
             type        = string
@@ -177,22 +171,19 @@ jobs:
             name                 = "gpu-quota-policy"
             scope                = var.resource_group_id
             policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/5c99bc60-3bcd-475f-b420-5a4abe6eaec4" # 가상 정책 ID (실제 ID로 대체 필요)
-            parameters           = <<PARAMETERS
-          {
-            "gpuQuotaValue": {
-              "value": ${local.gpu_quota}
-            }
-          }
-          PARAMETERS
+            parameters           = jsonencode({
+              gpuQuotaValue = {
+                value = local.gpu_quota
+              }
+            })
           }
           
           output "assigned_gpu_quota" {
             value = local.gpu_quota
           }
           EOF
-            
-            echo "GPU 정책 모듈이 생성되었습니다."
-          fi
+          
+          echo "GPU 정책 모듈이 생성되었습니다."
       
       - name: 'main.tf 파일 업데이트'
         run: |
@@ -477,7 +468,7 @@ jobs:
       - name: '메인 Terraform 파일 생성'
         run: |
           # main.tf 파일 생성
-          cat > main.tf << EOF
+          cat > main.tf << 'EOF'
           provider "azurerm" {
             features {}
           }
@@ -563,12 +554,29 @@ jobs:
           EOF
           
           # 변수 파일 생성
-          cat > terraform.tfvars << EOF
+          cat > terraform.tfvars << 'EOF'
           resource_group_name = "${TF_VAR_resource_group_name}"
           user_list = ${TF_VAR_user_list}
           gpu_size = "${TF_VAR_gpu_size}"
           environment = "${TF_VAR_environment}"
           EOF
+          
+          # 변수 파일 내용 확인
+          sed -i "s/\${TF_VAR_resource_group_name}/$TF_VAR_resource_group_name/g" terraform.tfvars
+          sed -i "s/\${TF_VAR_gpu_size}/$TF_VAR_gpu_size/g" terraform.tfvars
+          sed -i "s/\${TF_VAR_environment}/$TF_VAR_environment/g" terraform.tfvars
+          
+          # 사용자 목록 변수 처리 (JSON 배열)
+          USER_LIST_JSON=$TF_VAR_user_list
+          sed -i "s/\${TF_VAR_user_list}/$USER_LIST_JSON/g" terraform.tfvars
+          
+          echo "Terraform 파일이 생성되었습니다:"
+          echo "------- main.tf -------"
+          cat main.tf
+          echo "------- backend.tf -------"
+          cat backend.tf
+          echo "------- terraform.tfvars -------"
+          cat terraform.tfvars
       
       - name: Download Terraform Plan
         uses: actions/download-artifact@v4
