@@ -17,6 +17,15 @@ on:
       resource_group_exists:  
         description: '리소스 그룹 존재 여부'
         value: ${{ jobs.Pre-Check.outputs.resource_group_exists }}
+      user_list:
+        description: '사용자 목록 (JSON 배열)'
+        value: ${{ jobs.Pre-Check.outputs.user_list }}
+      gpu_size:
+        description: 'GPU 크기'
+        value: ${{ jobs.Pre-Check.outputs.gpu_size }}
+      environment:
+        description: '배포 환경'
+        value: ${{ jobs.Pre-Check.outputs.environment }}
     secrets:
       AZURE_CLIENT_ID:
         required: true
@@ -35,6 +44,9 @@ jobs:
       resource_group: ${{ steps.get-resource-group.outputs.resource_group }}
       resource_group_exists: ${{ steps.check-resource-group-exists.outputs.exists }}
       project_name: ${{ steps.extract-project-info.outputs.project_name }}
+      user_list: ${{ steps.extract-additional-info.outputs.user_list }}
+      gpu_size: ${{ steps.extract-additional-info.outputs.gpu_size }}
+      environment: ${{ steps.extract-additional-info.outputs.environment }}
     
     steps:
       - name: Extract Project Information from Issue
@@ -214,7 +226,113 @@ jobs:
             console.log(`✅ Resource Group name: ${resourceGroup}`);
             core.setOutput('resource_group', resourceGroup);
 
-
+      - name: Extract Additional Information from Issue
+        id: extract-additional-info
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            // workflow_call에서 전달받은 issue_number 사용
+            const issue_number = ${{ inputs.issue_number }};
+            const repo = context.repo;
+            
+            // 이슈 상세 정보 가져오기
+            const issue = await github.rest.issues.get({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: issue_number
+            });
+            
+            const issueBody = issue.data.body;
+            
+            // 초기화
+            let userList = [];
+            let gpuSize = "해당 없음";
+            let environment = "개발(Development)";
+            
+            if (issueBody) {
+              // 1. 사용자 목록 추출
+              try {
+                const userInfoMatch = issueBody.match(/### 사용자 목록\s*\n\n([\s\S]*?)(?=\n\n###|$)/);
+                if (userInfoMatch && userInfoMatch[1].trim() !== '') {
+                  const userInfoText = userInfoMatch[1].trim();
+                  
+                  // 여러 줄로 입력된 경우와 쉼표로 구분된 경우 모두 처리
+                  if (userInfoText.includes(',')) {
+                    // 쉼표로 구분된 경우
+                    userList = userInfoText.split(',').map(user => user.trim()).filter(Boolean);
+                  } else {
+                    // 줄바꿈으로 구분된 경우
+                    userList = userInfoText.split('\n').map(user => user.trim()).filter(Boolean);
+                  }
+                  
+                  console.log(`✅ 사용자 목록 추출 (${userList.length}명): ${userList.join(', ')}`);
+                } else {
+                  console.log('⚠️ 사용자 목록을 찾을 수 없거나 비어 있습니다.');
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue_number,
+                    body: `### ⚠️ 사용자 목록 누락\n\n사용자 목록이 누락되었습니다. 리소스에 접근할 사용자 정보를 입력해주세요.`
+                  });
+                }
+              } catch (error) {
+                console.log(`사용자 목록 추출 중 오류: ${error.message}`);
+              }
+              
+              // 2. GPU 크기 추출
+              try {
+                // GPU 사용 여부 확인
+                const gpuRequestMatch = issueBody.match(/### GPU 사용 여부\s*\n\n([^\n]+)/);
+                const gpuRequest = gpuRequestMatch ? gpuRequestMatch[1].trim() : null;
+                
+                if (gpuRequest === '필요함') {
+                  // GPU 크기 추출
+                  const gpuSizeMatch = issueBody.match(/### GPU 사용 구성\s*\n\n([^\n]+)/);
+                  if (gpuSizeMatch && gpuSizeMatch[1].trim() !== '해당 없음') {
+                    gpuSize = gpuSizeMatch[1].trim();
+                    console.log(`✅ GPU 크기: ${gpuSize}`);
+                  } else {
+                    console.log('⚠️ GPU 구성이 선택되지 않았습니다.');
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue_number,
+                      body: `### ⚠️ GPU 구성 누락\n\nGPU가 필요하다고 선택하셨지만 GPU 구성이 선택되지 않았습니다. GPU 사용 구성을 선택해주세요.`
+                    });
+                  }
+                } else {
+                  console.log('✅ GPU 리소스가 필요하지 않습니다.');
+                }
+              } catch (error) {
+                console.log(`GPU 정보 추출 중 오류: ${error.message}`);
+              }
+              
+              // 3. 환경 정보 추출
+              try {
+                const environmentMatch = issueBody.match(/### 환경\s*\n\n([^\n]+)/);
+                if (environmentMatch && environmentMatch[1].trim() !== '') {
+                  environment = environmentMatch[1].trim();
+                  console.log(`✅ 배포 환경: ${environment}`);
+                } else {
+                  console.log('⚠️ 환경 정보가 지정되지 않았습니다. 기본값(개발)을 사용합니다.');
+                }
+              } catch (error) {
+                console.log(`환경 정보 추출 중 오류: ${error.message}`);
+              }
+            }
+            
+            // 사용자 목록을 JSON 배열로 변환 (Terraform 변수로 사용하기 위함)
+            const userListJson = JSON.stringify(userList);
+            
+            // 결과 출력
+            core.setOutput('user_list', userListJson);
+            core.setOutput('gpu_size', gpuSize);
+            core.setOutput('environment', environment);
+            
+            console.log(`사용자 목록 JSON: ${userListJson}`);
+            console.log(`GPU 크기: ${gpuSize}`);
+            console.log(`배포 환경: ${environment}`);
       
       - name: 'Az CLI login with OIDC'
         id: azure-login
@@ -333,3 +451,6 @@ jobs:
           echo "- 프로젝트명: **${{ steps.extract-project-info.outputs.project_name }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 식별된 리소스 그룹: **${{ steps.get-resource-group.outputs.resource_group }}**" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹 충돌: **${{ steps.check-resource-group-exists.outputs.exists == 'true' && '⚠️ 충돌 있음' || '✅ 충돌 없음' }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 사용자 수: **$(echo '${{ steps.extract-additional-info.outputs.user_list }}' | jq 'length')**" >> $GITHUB_STEP_SUMMARY
+          echo "- GPU 크기: **${{ steps.extract-additional-info.outputs.gpu_size }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 배포 환경: **${{ steps.extract-additional-info.outputs.environment }}**" >> $GITHUB_STEP_SUMMARY

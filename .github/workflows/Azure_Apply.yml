@@ -39,6 +39,10 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_resource_group_name: ${{ needs.Pre-Check.outputs.resource_group }}
       PROJECT_NAME: ${{ needs.Pre-Check.outputs.project_name }}
+      # 사용자 목록과 GPU 크기를 환경 변수로 추가
+      TF_VAR_user_list: ${{ needs.Pre-Check.outputs.user_list }}
+      TF_VAR_gpu_size: ${{ needs.Pre-Check.outputs.gpu_size }}
+      TF_VAR_environment: ${{ needs.Pre-Check.outputs.environment }}
     
     steps:
       - uses: actions/checkout@v3
@@ -84,6 +88,195 @@ jobs:
           echo "백엔드 구성 파일 생성 완료 (프로젝트: ${PROJECT_NAME})"
           cat backend.tf
       
+      - name: '사용자 RBAC 및 GPU 정책 변수 파일 생성'
+        run: |
+          # terraform.tfvars 파일 생성
+          cat > terraform.tfvars << EOF
+          resource_group_name = "${TF_VAR_resource_group_name}"
+          user_list = ${TF_VAR_user_list}
+          gpu_size = "${TF_VAR_gpu_size}"
+          environment = "${TF_VAR_environment}"
+          EOF
+          
+          echo "변수 파일 생성 완료:"
+          cat terraform.tfvars
+      
+      - name: '사용자 RBAC 및 GPU 정책 모듈 확인'
+        run: |
+          # 필요한 Terraform 모듈 구조 확인
+          if [ ! -f "modules/rbac/main.tf" ]; then
+            echo "RBAC 모듈이 없습니다. 생성합니다."
+            mkdir -p modules/rbac
+            
+            # RBAC 모듈 생성
+            cat > modules/rbac/main.tf << EOF
+          variable "resource_group_id" {
+            description = "리소스 그룹 ID"
+            type        = string
+          }
+          
+          variable "user_list" {
+            description = "접근 권한을 부여할 사용자 목록 (이름:이메일 형식)"
+            type        = list(string)
+          }
+          
+          # 사용자 이메일 추출
+          locals {
+            user_emails = [for user in var.user_list : split(":", user)[1]]
+          }
+          
+          # 사용자별 역할 할당
+          resource "azurerm_role_assignment" "user_contributor" {
+            for_each             = toset(local.user_emails)
+            scope                = var.resource_group_id
+            role_definition_name = "Contributor"
+            principal_id         = each.value
+          }
+          
+          output "assigned_users" {
+            value = local.user_emails
+          }
+          EOF
+            
+            echo "RBAC 모듈이 생성되었습니다."
+          fi
+          
+          if [ ! -f "modules/gpu_policy/main.tf" ]; then
+            echo "GPU 정책 모듈이 없습니다. 생성합니다."
+            mkdir -p modules/gpu_policy
+            
+            # GPU 정책 모듈 생성
+            cat > modules/gpu_policy/main.tf << EOF
+          variable "resource_group_id" {
+            description = "리소스 그룹 ID"
+            type        = string
+          }
+          
+          variable "gpu_size" {
+            description = "필요한 GPU 크기 (Tiny, Small, Medium, Large, XLarge)"
+            type        = string
+            default     = "해당 없음"
+          }
+          
+          # GPU 크기별 할당량 매핑
+          locals {
+            gpu_quotas = {
+              "Tiny"    = 4
+              "Small"   = 8
+              "Medium"  = 16
+              "Large"   = 24
+              "XLarge"  = 32
+              "해당 없음" = 0
+            }
+            gpu_quota = lookup(local.gpu_quotas, var.gpu_size, 0)
+          }
+          
+          # GPU 할당량 정책 설정
+          resource "azurerm_policy_assignment" "gpu_quota" {
+            count                = local.gpu_quota > 0 ? 1 : 0
+            name                 = "gpu-quota-policy"
+            scope                = var.resource_group_id
+            policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/5c99bc60-3bcd-475f-b420-5a4abe6eaec4" # 가상 정책 ID (실제 ID로 대체 필요)
+            parameters           = <<PARAMETERS
+          {
+            "gpuQuotaValue": {
+              "value": ${local.gpu_quota}
+            }
+          }
+          PARAMETERS
+          }
+          
+          output "assigned_gpu_quota" {
+            value = local.gpu_quota
+          }
+          EOF
+            
+            echo "GPU 정책 모듈이 생성되었습니다."
+          fi
+      
+      - name: 'main.tf 파일 업데이트'
+        run: |
+          # main.tf 파일이 존재하는지 확인
+          if [ ! -f "main.tf" ]; then
+            # main.tf 파일 생성
+            cat > main.tf << EOF
+          provider "azurerm" {
+            features {}
+          }
+          
+          # 변수 정의
+          variable "resource_group_name" {
+            description = "배포할 리소스 그룹 이름"
+            type        = string
+          }
+          
+          variable "user_list" {
+            description = "접근 권한을 부여할 사용자 목록"
+            type        = list(string)
+            default     = []
+          }
+          
+          variable "gpu_size" {
+            description = "필요한 GPU 크기"
+            type        = string
+            default     = "해당 없음"
+          }
+          
+          variable "environment" {
+            description = "배포 환경"
+            type        = string
+            default     = "개발(Development)"
+          }
+          
+          # 리소스 그룹 생성
+          resource "azurerm_resource_group" "main" {
+            name     = var.resource_group_name
+            location = "Korea Central"
+            
+            tags = {
+              Environment = var.environment
+              ManagedBy   = "Terraform"
+              Project     = replace(var.resource_group_name, "rg-", "")
+            }
+          }
+          
+          # RBAC 모듈 호출
+          module "rbac" {
+            source           = "./modules/rbac"
+            resource_group_id = azurerm_resource_group.main.id
+            user_list        = var.user_list
+          }
+          
+          # GPU 정책 모듈 호출 
+          module "gpu_policy" {
+            source           = "./modules/gpu_policy"
+            resource_group_id = azurerm_resource_group.main.id
+            gpu_size         = var.gpu_size
+          }
+          
+          # 출력값 정의
+          output "resource_group_id" {
+            value = azurerm_resource_group.main.id
+          }
+          
+          output "resource_group_name" {
+            value = azurerm_resource_group.main.name
+          }
+          
+          output "assigned_users" {
+            value = module.rbac.assigned_users
+          }
+          
+          output "gpu_quota" {
+            value = module.gpu_policy.assigned_gpu_quota
+          }
+          EOF
+            
+            echo "main.tf 파일이 생성되었습니다."
+          else
+            echo "main.tf 파일이 이미 존재합니다. 내용을 확인하세요."
+          fi
+      
       - name: 'Az CLI login with OIDC'
         id: azure-login
         uses: azure/login@v1
@@ -105,12 +298,14 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan -var="resource_group_name=${TF_VAR_resource_group_name}" -out=tfplan
+          terraform plan -out=tfplan
           
           # 요약 추가
           echo "## Terraform Plan 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 프로젝트: **${PROJECT_NAME}**" >> $GITHUB_STEP_SUMMARY
+          echo "- GPU 크기: **${TF_VAR_gpu_size}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 환경: **${TF_VAR_environment}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ Plan 완료" >> $GITHUB_STEP_SUMMARY
       
       - name: Upload Terraform Plan
@@ -126,6 +321,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const issue_number = ${{ github.event.inputs.issue_number }};
+            
+            // GPU 크기 정보
+            const gpuSize = "${{ needs.Pre-Check.outputs.gpu_size }}";
+            const gpuInfo = gpuSize !== "해당 없음" ? `GPU 크기: \`${gpuSize}\`` : "GPU 할당: 없음";
+            
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -134,8 +334,11 @@ jobs:
               
               리소스 그룹: \`${{ needs.Pre-Check.outputs.resource_group }}\`
               프로젝트: \`${{ needs.Pre-Check.outputs.project_name }}\`
+              ${gpuInfo}
+              환경: \`${{ needs.Pre-Check.outputs.environment }}\`
               
-              Plan이 완료되었습니다. 팀장님의 승인 후 Apply가 진행됩니다.`
+              리소스 그룹 생성 및 사용자 RBAC, GPU 정책이 계획되었습니다.
+              팀장님의 승인 후 Apply가 진행됩니다.`
             });
 
   terraform-apply:
@@ -156,6 +359,9 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_resource_group_name: ${{ needs.Pre-Check.outputs.resource_group }}
+      TF_VAR_user_list: ${{ needs.Pre-Check.outputs.user_list }}
+      TF_VAR_gpu_size: ${{ needs.Pre-Check.outputs.gpu_size }}
+      TF_VAR_environment: ${{ needs.Pre-Check.outputs.environment }}
     
     steps:
       - name: Get Approval Status
@@ -177,15 +383,192 @@ jobs:
 
       - uses: actions/checkout@v3
       
-      - name: 'Az CLI login with OIDC'
+      - name: 'Azure CLI 로그인 (OIDC)'
         uses: azure/login@v1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       
-      - name: Setup Terraform
+      - name: 'Terraform 설정'
         uses: hashicorp/setup-terraform@v2
+      
+      - name: '사용자 RBAC 및 GPU 정책 모듈 확인'
+        run: |
+          # modules 디렉토리와 필요한 모듈이 있는지 확인
+          mkdir -p modules/rbac modules/gpu_policy
+          
+          # RBAC 모듈 생성
+          cat > modules/rbac/main.tf << EOF
+          variable "resource_group_id" {
+            description = "리소스 그룹 ID"
+            type        = string
+          }
+          
+          variable "user_list" {
+            description = "접근 권한을 부여할 사용자 목록 (이름:이메일 형식)"
+            type        = list(string)
+          }
+          
+          # 사용자 이메일 추출
+          locals {
+            user_emails = [for user in var.user_list : split(":", user)[1]]
+          }
+          
+          # 사용자별 역할 할당
+          resource "azurerm_role_assignment" "user_contributor" {
+            for_each             = toset(local.user_emails)
+            scope                = var.resource_group_id
+            role_definition_name = "Contributor"
+            principal_id         = each.value
+          }
+          
+          output "assigned_users" {
+            value = local.user_emails
+          }
+          EOF
+          
+          # GPU 정책 모듈 생성
+          cat > modules/gpu_policy/main.tf << EOF
+          variable "resource_group_id" {
+            description = "리소스 그룹 ID"
+            type        = string
+          }
+          
+          variable "gpu_size" {
+            description = "필요한 GPU 크기 (Tiny, Small, Medium, Large, XLarge)"
+            type        = string
+            default     = "해당 없음"
+          }
+          
+          # GPU 크기별 할당량 매핑
+          locals {
+            gpu_quotas = {
+              "Tiny"    = 4
+              "Small"   = 8
+              "Medium"  = 16
+              "Large"   = 24
+              "XLarge"  = 32
+              "해당 없음" = 0
+            }
+            gpu_quota = lookup(local.gpu_quotas, var.gpu_size, 0)
+          }
+          
+          # GPU 할당량 정책 설정
+          resource "azurerm_policy_assignment" "gpu_quota" {
+            count                = local.gpu_quota > 0 ? 1 : 0
+            name                 = "gpu-quota-policy"
+            scope                = var.resource_group_id
+            policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/5c99bc60-3bcd-475f-b420-5a4abe6eaec4" # 가상 정책 ID (실제 ID로 대체 필요)
+            parameters           = <<PARAMETERS
+          {
+            "gpuQuotaValue": {
+              "value": ${local.gpu_quota}
+            }
+          }
+          PARAMETERS
+          }
+          
+          output "assigned_gpu_quota" {
+            value = local.gpu_quota
+          }
+          EOF
+      
+      - name: '메인 Terraform 파일 생성'
+        run: |
+          # main.tf 파일 생성
+          cat > main.tf << EOF
+          provider "azurerm" {
+            features {}
+          }
+          
+          # 변수 정의
+          variable "resource_group_name" {
+            description = "배포할 리소스 그룹 이름"
+            type        = string
+          }
+          
+          variable "user_list" {
+            description = "접근 권한을 부여할 사용자 목록"
+            type        = list(string)
+            default     = []
+          }
+          
+          variable "gpu_size" {
+            description = "필요한 GPU 크기"
+            type        = string
+            default     = "해당 없음"
+          }
+          
+          variable "environment" {
+            description = "배포 환경"
+            type        = string
+            default     = "개발(Development)"
+          }
+          
+          # 리소스 그룹 생성
+          resource "azurerm_resource_group" "main" {
+            name     = var.resource_group_name
+            location = "Korea Central"
+            
+            tags = {
+              Environment = var.environment
+              ManagedBy   = "Terraform"
+              Project     = replace(var.resource_group_name, "rg-", "")
+            }
+          }
+          
+          # RBAC 모듈 호출
+          module "rbac" {
+            source           = "./modules/rbac"
+            resource_group_id = azurerm_resource_group.main.id
+            user_list        = var.user_list
+          }
+          
+          # GPU 정책 모듈 호출 
+          module "gpu_policy" {
+            source           = "./modules/gpu_policy"
+            resource_group_id = azurerm_resource_group.main.id
+            gpu_size         = var.gpu_size
+          }
+          
+          # 출력값 정의
+          output "resource_group_id" {
+            value = azurerm_resource_group.main.id
+          }
+          
+          output "resource_group_name" {
+            value = azurerm_resource_group.main.name
+          }
+          
+          output "assigned_users" {
+            value = module.rbac.assigned_users
+          }
+          
+          output "gpu_quota" {
+            value = module.gpu_policy.assigned_gpu_quota
+          }
+          EOF
+          
+          # 백엔드 구성 파일 생성
+          cat > backend.tf << EOF
+          terraform {
+            backend "azurerm" {
+              resource_group_name  = "terraform-state-rg"
+              storage_account_name = "tfstatebithumbdev"
+              container_name       = "tfstate"
+              key                  = "projects/${{ needs.Pre-Check.outputs.project_name }}/terraform.tfstate"
+            }
+          }
+          EOF
+          
+          # 변수 파일 생성
+          cat > terraform.tfvars << EOF
+          resource_group_name = "${TF_VAR_resource_group_name}"
+          user_list = ${TF_VAR_user_list}
+          gpu_size = "${TF_VAR_gpu_size}"
+          environment = "${TF_VAR_environment}"
+          EOF
       
       - name: Download Terraform Plan
         uses: actions/download-artifact@v4
@@ -204,9 +587,19 @@ jobs:
           echo "## Terraform Apply 결과" >> $GITHUB_STEP_SUMMARY
           echo "- 리소스 그룹: **${TF_VAR_resource_group_name}**" >> $GITHUB_STEP_SUMMARY
           echo "- 프로젝트: **${{ needs.Pre-Check.outputs.project_name }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- GPU 크기: **${TF_VAR_gpu_size}**" >> $GITHUB_STEP_SUMMARY
+          echo "- 환경: **${TF_VAR_environment}**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 성공적으로 배포됨" >> $GITHUB_STEP_SUMMARY
           
-          # 리소스 목록 출력 (선택적)
+          # 사용자 RBAC 정보 출력
+          echo "### 접근 권한 배포 (RBAC)" >> $GITHUB_STEP_SUMMARY
+          echo "- 권한을 받은 사용자: $(terraform output -json assigned_users)" >> $GITHUB_STEP_SUMMARY
+          
+          # GPU 할당량 정보 출력
+          echo "### GPU 할당량 정책" >> $GITHUB_STEP_SUMMARY
+          echo "- 할당된 GPU 수: $(terraform output -raw gpu_quota)" >> $GITHUB_STEP_SUMMARY
+          
+          # 배포된 리소스 목록 출력
           echo "### 배포된 리소스" >> $GITHUB_STEP_SUMMARY
           terraform state list | while read -r resource; do
             echo "- \`$resource\`" >> $GITHUB_STEP_SUMMARY
@@ -227,6 +620,10 @@ jobs:
             // Azure 포털 링크 생성
             const portalLink = `https://portal.azure.com/#@/resource/subscriptions/${subscriptionId}/resourceGroups/${resourceGroupName}/overview`;
             
+            // GPU 크기 정보
+            const gpuSize = "${{ needs.Pre-Check.outputs.gpu_size }}";
+            const gpuInfo = gpuSize !== "해당 없음" ? `- GPU 할당량: \`${gpuSize}\`` : "- GPU 할당: 없음";
+            
             // 1. 이슈에 코멘트 추가
             await github.rest.issues.createComment({
               owner: owner,
@@ -236,8 +633,13 @@ jobs:
               
               리소스 그룹: \`${resourceGroupName}\`
               프로젝트: \`${{ needs.Pre-Check.outputs.project_name }}\`
+              ${gpuInfo}
+              환경: \`${{ needs.Pre-Check.outputs.environment }}\`
               
-              인프라 배포가 완료되었습니다.
+              ### 배포 내용:
+              - 리소스 그룹 생성 완료
+              - 사용자 RBAC 권한 설정 완료
+              - GPU 할당량 정책 설정 완료
               
               ### 리소스 그룹 접속
               [Azure 포털에서 리소스 그룹 보기](${portalLink})`
