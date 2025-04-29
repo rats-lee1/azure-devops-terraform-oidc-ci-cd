@@ -66,13 +66,13 @@ body:
       description: 리소스에 접근할 사용자 정보를 입력하세요
       placeholder: |
         예시)
-        홍길동:gildong.hong@kt.com
-        김철수:chulsoo.kim@kt.com
-        이영희:younghee.lee@kt.com
+        홍길동:gildong@kt.com
+        김철수:chulsoo@kt.com
+        이영희:younghee@kt.com
         
         또는
         
-        홍길동:gildong.hong@kt.com, 김철수:chulsoo.kim@kt.com, 이영희:younghee.lee@kt.com
+        홍길동:gildong@kt.com, 김철수:chulsoo@kt.com, 이영희:younghee@kt.com
     validations:
       required: true
 
@@ -80,7 +80,7 @@ body:
     attributes:
       value: |
         ## 리소스 그룹 정보
-        아래 정보를 정확히 입력해주세요. 이 정보는 배포 프로세스에 사용됩니다.
+        아래 정보를 정확히 입력해주세요. 이 정보는 자동화된 배포 프로세스에 사용됩니다.
 
   - type: input
     id: resource-group-name
