@@ -51,8 +51,36 @@ body:
   - type: markdown
     attributes:
       value: |
+        ## 사용자 정보
+        리소스에 접근 권한이 필요한 사용자를 입력해주세요. 이 정보는 인프라 배포 시 정책(policy)에 접근 권한을 부여하는 데 사용됩니다.
+        
+        **형식 안내**: 
+        - 각 사용자를 "이름:아이디@kt.com" 형식으로 입력하세요
+        - 여러 사용자는 쉼표(,)로 구분하거나 한 줄에 한 명씩 입력하세요
+        - [전체 사용자 목록](링크주소)에서 정확한 사용자 정보를 확인할 수 있습니다
+
+  - type: textarea
+    id: user-info
+    attributes:
+      label: 사용자 목록
+      description: 리소스에 접근할 사용자 정보를 입력하세요
+      placeholder: |
+        예시)
+        홍길동:gildong.hong@kt.com
+        김철수:chulsoo.kim@kt.com
+        이영희:younghee.lee@kt.com
+        
+        또는
+        
+        홍길동:gildong.hong@kt.com, 김철수:chulsoo.kim@kt.com, 이영희:younghee.lee@kt.com
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
         ## 리소스 그룹 정보
-        아래 정보를 정확히 입력해주세요. 이 정보는 자동화된 배포 프로세스에 사용됩니다.
+        아래 정보를 정확히 입력해주세요. 이 정보는 배포 프로세스에 사용됩니다.
 
   - type: input
     id: resource-group-name
