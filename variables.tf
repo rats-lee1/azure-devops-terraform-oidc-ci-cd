@@ -1,3 +1,4 @@
+# 변수 정의
 variable "resource_group_name" {
   description = "배포할 리소스 그룹 이름"
   type        = string

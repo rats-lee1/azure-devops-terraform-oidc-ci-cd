@@ -2,6 +2,11 @@ provider "azurerm" {
   features {}
 }
 
+provider "azuread" {
+  # AzureAD 공급자 설정
+  # Azure CLI 로그인과 동일한 인증 정보를 사용합니다
+}
+
 # 리소스 그룹 생성
 resource "azurerm_resource_group" "main" {
   name     = var.resource_group_name
@@ -34,12 +39,18 @@ locals {
   gpu_quota = lookup(local.gpu_quotas, var.gpu_size, 0)
 }
 
+# Azure AD 사용자 조회
+data "azuread_user" "users" {
+  for_each            = toset(local.user_emails)
+  mail                = each.value
+}
+
 # 사용자별 역할 할당
 resource "azurerm_role_assignment" "user_contributor" {
-  for_each             = toset(local.user_emails)
+  for_each             = data.azuread_user.users
   scope                = azurerm_resource_group.main.id
   role_definition_name = "Contributor"
-  principal_id         = each.value
+  principal_id         = each.value.object_id
 }
 
 # =====================================================
