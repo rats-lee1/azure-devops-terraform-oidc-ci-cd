@@ -455,7 +455,7 @@ jobs:
             });
             
             const matchArtifact = artifacts.data.artifacts.filter((artifact) => {
-              return artifact.name === "terraform-plan"
+              return artifact.name === "terraform-filess"
             })[0];
             
             let deleteStatus = "❌ 아티팩트를 찾을 수 없음";
