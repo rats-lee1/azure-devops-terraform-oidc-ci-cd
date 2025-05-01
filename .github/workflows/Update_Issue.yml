@@ -10,32 +10,33 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+        - uses: actions/checkout@v3
 
-      # (선택) Azure 로그인 — 서비스 프린시플로 교체
-      - name: 'Azure CLI 로그인 (OIDC)'
-        uses: azure/login@v1
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        # (선택) Azure 로그인 — 서비스 프린시플로 교체
+        - name: 'Azure CLI 로그인 (OIDC)'
+            uses: azure/login@v1
+            with:
+            client-id: ${{ secrets.AZURE_CLIENT_ID }}
+            tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+            subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 실제 RG 목록 ↔︎ 더미 목록
-      - name: Collect RG list
-        id: rg
-        run: |
-          if [[ "${{ steps.az.outputs.loggedin }}" == "true" ]]; then
-            LIST=$(az group list --query "[].name" -o tsv | paste -sd ',' -)
-          else
-            LIST="dev-rg,prod-rg,staging-rg"   # 테스트용 예시
-          fi
-          echo "list=$LIST" >> "$GITHUB_OUTPUT"
+        # 실제 RG 목록 ↔︎ 더미 목록
+        - name: 'Collect RG list'
+            id: rg
+            run: |
+                if [[ "${{ steps.az.outputs.loggedin }}" == "true" ]]; then
+                    LIST=$(az group list --query "[].name" -o tsv | paste -sd ',' -)
+                else
+                    LIST="dev-rg,prod-rg,staging-rg"   # 테스트용 예시
+                fi
+                echo "list=$LIST" >> "$GITHUB_OUTPUT"
 
-      # 드롭다운 옵션 주입
-      - uses: ShaMan123/gha-form-dropdown-options@v2.0.5
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          template: .github/ISSUE_TEMPLATE/resource_request_template.yaml
-          form:     .github/ISSUE_TEMPLATE/resource_request.yaml
-          _dropdown_id: rg
-          options: ${{ steps.rg.outputs.list }}
+        # 드롭다운 옵션 주입
+        - name: 'Dropdown option update'
+            uses: ShaMan123/gha-form-dropdown-options@v2.0.5
+            with:
+            github_token: ${{ secrets.GITHUB_TOKEN }}
+            template: .github/ISSUE_TEMPLATE/resource_request_template.yaml
+            form:     .github/ISSUE_TEMPLATE/resource_request.yaml
+            _dropdown_id: rg
+            options: ${{ steps.rg.outputs.list }}
