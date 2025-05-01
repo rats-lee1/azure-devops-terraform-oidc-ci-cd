@@ -9,8 +9,12 @@ on:
 # OIDC 인증을 위한 권한 설정 추가
 permissions:
     id-token: write
-    contents: write
+    contents: write   # 저장소에 쓰기 권한 필요
     issues: write    # 이슈 템플릿을 수정하기 위해 필요
+
+# 환경 변수로 제외할 리소스 그룹 목록 정의
+env:
+  EXCLUDED_RESOURCE_GROUPS: "NetworkWatcherRG,terraform-state-rg"
 
 jobs:
     build:
@@ -26,13 +30,30 @@ jobs:
                 tenant-id: ${{ secrets.AZURE_TENANT_ID }}
                 subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-            # 실제 RG 목록 ↔︎ 더미 목록
-            - name: 'Collect RG list'
+            # 실제 RG 목록 ↔︎ 더미 목록 (확장 가능한 필터링)
+            - name: 'Collect RG list (제외 목록 적용)'
               id: rg
               run: |
-                    # 로그인 상태 확인 로직 수정
                     if az account show &>/dev/null; then
-                        LIST=$(az group list --query "[].name" -o tsv | paste -sd ',' -)
+                        # 제외할 리소스 그룹 목록을 배열로 변환
+                        IFS=',' read -ra EXCLUDE_ARRAY <<< "$EXCLUDED_RESOURCE_GROUPS"
+                        
+                        # 조건식 생성
+                        QUERY_CONDITIONS=""
+                        for excluded in "${EXCLUDE_ARRAY[@]}"; do
+                            if [ -n "$QUERY_CONDITIONS" ]; then
+                                QUERY_CONDITIONS+=" && "
+                            fi
+                            QUERY_CONDITIONS+="name!='$excluded'"
+                        done
+                        
+                        # 쿼리 생성
+                        QUERY="[?$QUERY_CONDITIONS].name"
+                        echo "JMESPath 쿼리: $QUERY"
+                        
+                        # 쿼리 실행
+                        LIST=$(az group list --query "$QUERY" -o tsv | paste -sd ',' -)
+                        echo "필터링된 리소스 그룹 목록: $LIST"
                     else
                         LIST="dev-rg,prod-rg,staging-rg"   # 테스트용 예시
                     fi
@@ -44,6 +65,6 @@ jobs:
               with:
                 github_token: ${{ secrets.GITHUB_TOKEN }}
                 template: .github/ISSUE_TEMPLATE/resource_request_template.yaml
-                form:     .github/ISSUE_TEMPLATE/resource_request_template.yaml
+                form:     .github/ISSUE_TEMPLATE/resource_request.yaml
                 dropdown: rg
                 options: ${{ steps.rg.outputs.list }}
