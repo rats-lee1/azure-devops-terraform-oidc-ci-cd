@@ -63,8 +63,8 @@ body:
     id: resource-group-name
     attributes:
       label: 리소스_그룹명
-      description: 배포할 리소스 그룹의 이름을 입력하세요
-      placeholder: 예시) [프로젝트명]-dev-rg
+      description: 배포할 리소스 그룹의 이름을 입력하세요. ( [프로젝트명]-[배포환경]-rg , 반드시 영문으로 작성할 것 )
+      placeholder: 예시) KTchatbotPOC-dev-rg
     validations:
       required: true
 
