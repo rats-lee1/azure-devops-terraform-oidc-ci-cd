@@ -30,7 +30,7 @@ jobs:
             - name: 'Collect RG list'
               id: rg
               run: |
-                    # 로그인 상태 확인 로직 수정 (outputs.loggedin 사용 안 함)
+                    # 로그인 상태 확인 로직 수정
                     if az account show &>/dev/null; then
                         LIST=$(az group list --query "[].name" -o tsv | paste -sd ',' -)
                     else
@@ -44,6 +44,6 @@ jobs:
               with:
                 github_token: ${{ secrets.GITHUB_TOKEN }}
                 template: .github/ISSUE_TEMPLATE/resource_request_template.yaml
-                form:     .github/ISSUE_TEMPLATE/resource_request.yaml
-                _dropdown_id: rg
+                form:     .github/ISSUE_TEMPLATE/resource_request_template.yaml
+                dropdown: rg
                 options: ${{ steps.rg.outputs.list }}
