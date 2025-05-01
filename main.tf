@@ -17,8 +17,7 @@ resource "azurerm_resource_group" "main" {
     Environment = var.environment
     ManagedBy   = "Terraform"
     Project     = replace(var.resource_group_name, "rg-", "")
-    GPUQuota    = local.gpu_quota > 0 ? tostring(local.gpu_quota) : "0"
-
+    GPUQuota    = var.gpu_size != "0" ? var.gpu_size : "0"
   }
 }
 
@@ -26,26 +25,15 @@ resource "azurerm_resource_group" "main" {
 # RBAC (사용자 권한 관리) 로직
 # =====================================================
 
-# 사용자 이메일 추출
 locals {
-  user_emails = [for user in var.user_list : split(":", user)[1]]
-  
-  # GPU 크기별 할당량 매핑
-  gpu_quotas = {
-    "Tiny"    = 4
-    "Small"   = 8
-    "Medium"  = 16
-    "Large"   = 24
-    "XLarge"  = 32
-    "해당 없음" = 0
-  }
-  gpu_quota = lookup(local.gpu_quotas, var.gpu_size, 0)
+  # GPU 쿼터는 이제 var.gpu_size를 직접 사용 (이미 숫자만 포함)
+  gpu_quota = tonumber(var.gpu_size)
 }
 
 # Azure AD 사용자 조회
 data "azuread_user" "users" {
-  for_each            = toset(local.user_emails)
-  mail                = each.value
+  for_each = toset(var.user_list)
+  mail     = each.value
 }
 
 # 사용자별 역할 할당
@@ -62,10 +50,10 @@ resource "azurerm_role_assignment" "user_contributor" {
 
 # GPU 할당량을 리소스 그룹 태그로 설정 (정책 대신)
 resource "azurerm_resource_group_policy_assignment" "gpu_quota" {
-  count               = local.gpu_quota > 0 ? 1 : 0
-  name                = "gpu-quota-policy"
-  resource_group_id   = azurerm_resource_group.main.id
-  policy_definition_id = "/subscriptions/d4adf5c4-07b2-48bf-9105-c296a8353411/providers/Microsoft.Authorization/policyDefinitions/a5121561-90f0-445c-a41a-a96602c862ad" # 실제 정책 ID로 교체
+  count                = local.gpu_quota > 0 ? 1 : 0
+  name                 = "gpu-quota-policy"
+  resource_group_id    = azurerm_resource_group.main.id
+  policy_definition_id = "/subscriptions/d4adf5c4-07b2-48bf-9105-c296a8353411/providers/Microsoft.Authorization/policyDefinitions/a5121561-90f0-445c-a41a-a96602c862ad"
   
   parameters = jsonencode({
     "effect": {
@@ -84,7 +72,7 @@ output "resource_group_name" {
 }
 
 output "assigned_users" {
-  value = local.user_emails
+  value = var.user_list
 }
 
 output "gpu_quota" {
