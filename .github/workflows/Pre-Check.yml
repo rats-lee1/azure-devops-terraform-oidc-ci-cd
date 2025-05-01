@@ -22,7 +22,7 @@ on:
         value: ${{ jobs.Pre-Check.outputs.user_list }}
       gpu_size:
         description: 'GPU 크기'
-        value: ${{ jobs.Pre-Check.outputs.gpu_size }}
+        value: ${{ jobs.Pre-Check.outputs.gpuNumeric }}
       environment:
         description: '배포 환경'
         value: ${{ jobs.Pre-Check.outputs.environment }}
