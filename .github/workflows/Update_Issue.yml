@@ -40,7 +40,7 @@ jobs:
           echo "list=$LIST" >> "$GITHUB_OUTPUT"
 
       # 드롭다운 옵션 주입
-      - uses: ShaMan123/gha-form-dropdown-options@v2
+      - uses: ShaMan123/gha-form-dropdown-options@v2.0.5
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           template: .github/ISSUE_TEMPLATE/resource_request_template.yaml
