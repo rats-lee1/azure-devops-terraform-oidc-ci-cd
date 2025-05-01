@@ -291,7 +291,17 @@ jobs:
                   const gpuSizeMatch = issueBody.match(/### GPU 사용 구성\s*\n\n([^\n]+)/);
                   if (gpuSizeMatch && gpuSizeMatch[1].trim() !== '해당 없음') {
                     gpuSize = gpuSizeMatch[1].trim();
-                    console.log(`✅ GPU 크기: ${gpuSize}`);
+                    console.log(`✅ 원본 GPU 크기: ${gpuSize}`);
+                    
+                    // GPU 크기 문자열에서 숫자만 추출 (괄호 안의 숫자)
+                    const gpuNumMatch = gpuSize.match(/\((\d+)\s+GPU/);
+                    if (gpuNumMatch && gpuNumMatch[1]) {
+                      gpuNumeric = gpuNumMatch[1];
+                      console.log(`✅ 추출된 GPU 숫자: ${gpuNumeric}`);
+                    } else {
+                      console.log('⚠️ GPU 숫자를 추출할 수 없습니다.');
+                      gpuNumeric = "0";
+                    }
                   } else {
                     console.log('⚠️ GPU 구성이 선택되지 않았습니다.');
                     await github.rest.issues.createComment({
@@ -303,6 +313,7 @@ jobs:
                   }
                 } else {
                   console.log('✅ GPU 리소스가 필요하지 않습니다.');
+                  gpuNumeric = "0";
                 }
               } catch (error) {
                 console.log(`GPU 정보 추출 중 오류: ${error.message}`);
