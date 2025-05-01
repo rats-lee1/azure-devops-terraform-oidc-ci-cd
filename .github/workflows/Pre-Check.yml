@@ -22,7 +22,7 @@ on:
         value: ${{ jobs.Pre-Check.outputs.user_list }}
       gpu_size:
         description: 'GPU 크기'
-        value: ${{ jobs.Pre-Check.outputs.gpuNumeric }}
+        value: ${{ jobs.Pre-Check.outputs.gpu_size }}
       environment:
         description: '배포 환경'
         value: ${{ jobs.Pre-Check.outputs.environment }}
@@ -338,7 +338,7 @@ jobs:
             
             // 결과 출력
             core.setOutput('user_list', userListJson);
-            core.setOutput('gpu_size', gpuSize);
+            core.setOutput('gpu_size', gpuNumeric);
             core.setOutput('environment', environment);
             
             console.log(`사용자 목록 JSON: ${userListJson}`);
