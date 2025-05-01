@@ -423,7 +423,7 @@ jobs:
       - name: Update Summary for Cleanup
         run: |
           echo "## 아티팩트 정리" >> $GITHUB_STEP_SUMMARY
-          echo "- 작업: terraform-plan 아티팩트 정리" >> $GITHUB_STEP_SUMMARY
+          echo "- 작업: terraform 관련 아티팩트 정리" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: 진행 중..." >> $GITHUB_STEP_SUMMARY
 
       - name: List available artifacts
@@ -442,7 +442,7 @@ jobs:
               console.log(`- ${artifact.name} (ID: ${artifact.id})`);
             }
             
-      - name: Delete terraform-plan artifact
+      - name: Delete terraform artifacts
         id: delete-artifact
         uses: actions/github-script@v6
         with:
@@ -454,27 +454,39 @@ jobs:
               run_id: context.runId
             });
             
-            const matchArtifact = artifacts.data.artifacts.filter((artifact) => {
-              return artifact.name === "terraform-files"
-            })[0];
+            // 모든 terraform 관련 아티팩트 찾기
+            const terraformArtifacts = artifacts.data.artifacts.filter((artifact) => {
+              return artifact.name.toLowerCase().includes('terraform');
+            });
             
             let deleteStatus = "❌ 아티팩트를 찾을 수 없음";
+            let deletedCount = 0;
             
-            if (matchArtifact) {
-              await github.rest.actions.deleteArtifact({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                artifact_id: matchArtifact.id
-              });
-              console.log(`Successfully deleted artifact: terraform-plan (ID: ${matchArtifact.id})`);
-              deleteStatus = "✅ 성공적으로 삭제됨";
+            if (terraformArtifacts.length > 0) {
+              for (const artifact of terraformArtifacts) {
+                try {
+                  await github.rest.actions.deleteArtifact({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    artifact_id: artifact.id
+                  });
+                  console.log(`Successfully deleted artifact: ${artifact.name} (ID: ${artifact.id})`);
+                  deletedCount++;
+                } catch (error) {
+                  console.log(`Failed to delete artifact ${artifact.name}: ${error.message}`);
+                }
+              }
+              
+              if (deletedCount > 0) {
+                deleteStatus = `✅ ${deletedCount}개 아티팩트 성공적으로 삭제됨`;
+              }
             } else {
-              console.log('No terraform-plan artifact found');
+              console.log('No terraform-related artifacts found');
             }
             
             // 요약 업데이트
             const fs = require('fs');
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- terraform-plan: **${deleteStatus}**\n`);
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Terraform 아티팩트: **${deleteStatus}**\n`);
             
       - name: Final Workflow Summary
         run: |
