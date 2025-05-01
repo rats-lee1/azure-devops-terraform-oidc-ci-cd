@@ -346,7 +346,8 @@ jobs:
             
             // 사용자 목록을 JSON 배열로 변환 (Terraform 변수로 사용하기 위함)
             const userListJson = JSON.stringify(userList);
-            
+            const emailListJson = JSON.stringify(emailList);
+
             // 결과 출력
             core.setOutput('user_list', emailListJson);
             core.setOutput('gpu_size', gpuNumeric);
