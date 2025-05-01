@@ -251,7 +251,7 @@ jobs:
             let environment = "개발(Development)";
             
             if (issueBody) {
-              // 1. 사용자 목록 추출
+              // 1. 사용자 목록 추출 및 이메일만 추출
               try {
                 const userInfoMatch = issueBody.match(/### 사용자 목록\s*\n\n([\s\S]*?)(?=\n\n###|$)/);
                 if (userInfoMatch && userInfoMatch[1].trim() !== '') {
@@ -266,7 +266,18 @@ jobs:
                     userList = userInfoText.split('\n').map(user => user.trim()).filter(Boolean);
                   }
                   
+                  // 이메일 주소만 추출
+                  emailList = userList.map(user => {
+                    // "이름:이메일" 형식에서 이메일 부분만 추출
+                    const parts = user.split(':');
+                    if (parts.length > 1) {
+                      return parts[1].trim(); // 이메일 부분 반환
+                    }
+                    return user.trim(); // 구분자가 없으면 그대로 반환
+                  });
+                  
                   console.log(`✅ 사용자 목록 추출 (${userList.length}명): ${userList.join(', ')}`);
+                  console.log(`✅ 이메일 목록 추출: ${emailList.join(', ')}`);
                 } else {
                   console.log('⚠️ 사용자 목록을 찾을 수 없거나 비어 있습니다.');
                   await github.rest.issues.createComment({
@@ -337,7 +348,7 @@ jobs:
             const userListJson = JSON.stringify(userList);
             
             // 결과 출력
-            core.setOutput('user_list', userListJson);
+            core.setOutput('user_list', emailListJson);
             core.setOutput('gpu_size', gpuNumeric);
             core.setOutput('environment', environment);
             
