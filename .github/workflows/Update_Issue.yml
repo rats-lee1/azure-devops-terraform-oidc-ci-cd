@@ -1,0 +1,49 @@
+name: "Update RG dropdown"
+on:
+  workflow_dispatch:        # 수동 실행용
+  push:                     # IaC·워크플로 변경 시 자동 실행
+    paths:
+      - "iac/**"
+      - ".github/workflows/update-rg-dropdown.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # (선택) Azure 로그인 — 서비스 프린시플로 교체
+      - name: Azure login
+        id: az
+        env:
+          AZURE_CLIENT_ID:     ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID:     ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          if [[ -n "$AZURE_CLIENT_ID" ]]; then
+            az login --service-principal -u "$AZURE_CLIENT_ID" \
+                     -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+            echo "loggedin=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "loggedin=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 실제 RG 목록 ↔︎ 더미 목록
+      - name: Collect RG list
+        id: rg
+        run: |
+          if [[ "${{ steps.az.outputs.loggedin }}" == "true" ]]; then
+            LIST=$(az group list --query "[].name" -o tsv | paste -sd ',' -)
+          else
+            LIST="dev-rg,prod-rg,staging-rg"   # 테스트용 예시
+          fi
+          echo "list=$LIST" >> "$GITHUB_OUTPUT"
+
+      # 드롭다운 옵션 주입
+      - uses: ShaMan123/gha-form-dropdown-options@v2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          template: .github/ISSUE_TEMPLATE/resource_request_template.yaml
+          form:     .github/ISSUE_TEMPLATE/resource_request.yaml
+          _dropdown_id: rg
+          options: ${{ steps.rg.outputs.list }}

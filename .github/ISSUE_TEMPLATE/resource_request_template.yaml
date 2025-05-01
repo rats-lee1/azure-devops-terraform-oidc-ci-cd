@@ -1,0 +1,30 @@
+name: "💠 Resource Request"
+description: "기존 RG에 새 Azure 리소스를 배치하거나, 필요 시 새 RG를 만들어 주세요."
+title: "[IAC] <리소스 타입> 요청"
+labels: ["infra"]
+assignees: []
+
+body:
+  - type: dropdown          # 워크플로가 options를 채움
+    id: rg
+    attributes:
+      label: 대상 Resource Group
+      description: 리소스를 배치할 RG를 고르세요
+      multiple: false
+      options: []           # ← 비워 두는 게 핵심
+    validations:
+      required: true
+
+  - type: input
+    id: resource_type
+    attributes:
+      label: 리소스 타입
+      placeholder: "storage_account / vm / function_app ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: 추가 설명
+      description: "region·사이즈·태그 등 세부 옵션을 적어 주세요"
