@@ -69,57 +69,27 @@ jobs:
             let projectName = null;
             const issueBody = issue.data.body;
             
-            // 이슈 본문에서 요청 유형과 프로젝트명 추출
+            // 이슈 본문에서 프로젝트명 추출 (변경된 템플릿에 맞게 수정)
             if (issueBody) {
-              // 요청 유형 확인
-              const requestTypeMatch = issueBody.match(/### 요청 유형\s*\n\n([^\n]+)/);
-              const requestType = requestTypeMatch ? requestTypeMatch[1].trim() : null;
-              console.log(`요청 유형: ${requestType}`);
-              
-              if (requestType === '신규 프로젝트 생성') {
-                // 신규 프로젝트 생성인 경우 프로젝트명 필드에서 추출
-                const projectNameMatch = issueBody.match(/### 프로젝트명\s*\n\n([^\n]+)/);
-                if (projectNameMatch && projectNameMatch[1].trim() !== '') {
-                  projectName = projectNameMatch[1].trim();
-                  console.log(`✅ 신규 프로젝트명: ${projectName}`);
-                } else {
-                  console.log('⚠️ 신규 프로젝트 생성이지만 프로젝트명이 입력되지 않았습니다.');
-                  
-                  // 오류를 이슈에 코멘트로 추가
-                  try {
-                    await github.rest.issues.createComment({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      issue_number: issue_number,
-                      body: `### ❌ 프로젝트명 누락\n\n신규 프로젝트 생성을 선택하셨지만 프로젝트명이 입력되지 않았습니다. 프로젝트명을 입력해주세요.`
-                    });
-                  } catch (commentError) {
-                    console.error('코멘트 추가 중 오류 발생:', commentError.message);
-                  }
-                }
-              } else if (requestType === '기존 프로젝트 업데이트') {
-                // 기존 프로젝트 업데이트인 경우 기존 프로젝트 선택 필드에서 추출
-                const existingProjectMatch = issueBody.match(/### 기존 프로젝트 선택\s*\n\n([^\n]+)/);
-                if (existingProjectMatch && existingProjectMatch[1].trim() !== '선택하세요') {
-                  projectName = existingProjectMatch[1].trim();
-                  console.log(`✅ 기존 프로젝트명: ${projectName}`);
-                } else {
-                  console.log('⚠️ 기존 프로젝트 업데이트이지만 프로젝트가 선택되지 않았습니다.');
-                  
-                  // 오류를 이슈에 코멘트로 추가
-                  try {
-                    await github.rest.issues.createComment({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      issue_number: issue_number,
-                      body: `### ❌ 프로젝트 선택 누락\n\n기존 프로젝트 업데이트를 선택하셨지만 프로젝트가 선택되지 않았습니다. 기존 프로젝트를 선택해주세요.`
-                    });
-                  } catch (commentError) {
-                    console.error('코멘트 추가 중 오류 발생:', commentError.message);
-                  }
-                }
+              // 프로젝트명 필드에서 추출
+              const projectNameMatch = issueBody.match(/### 프로젝트명\s*\n\n([^\n]+)/);
+              if (projectNameMatch && projectNameMatch[1].trim() !== '') {
+                projectName = projectNameMatch[1].trim();
+                console.log(`✅ 프로젝트명: ${projectName}`);
               } else {
-                console.log('⚠️ 요청 유형을 확인할 수 없습니다.');
+                console.log('⚠️ 프로젝트명이 입력되지 않았습니다.');
+                
+                // 오류를 이슈에 코멘트로 추가
+                try {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue_number,
+                    body: `### ❌ 프로젝트명 누락\n\n프로젝트명이 입력되지 않았습니다. 프로젝트명을 입력해주세요.`
+                  });
+                } catch (commentError) {
+                  console.error('코멘트 추가 중 오류 발생:', commentError.message);
+                }
               }
             }
             
