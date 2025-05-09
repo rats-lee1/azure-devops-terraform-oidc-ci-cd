@@ -232,6 +232,52 @@ jobs:
           echo "- 환경: **production**" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ✅ 승인됨" >> $GITHUB_STEP_SUMMARY
 
+      - name: Approval Message to Issue
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = ${{ github.event.inputs.issue_number }};
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            
+            github.rest.issues.createComment({
+              owner: owner,
+              repo: repo,
+              issue_number: issue_number,
+              body: `## 승인 완료 ✅
+
+              팀장님께서 승인하셨습니다. 인프라 프로비저닝을 수행합니다.`
+            });
+            // 2) 기존 라벨 제거
+            try {
+              // 현재 이슈의 모든 라벨 조회
+              const issueData = await github.rest.issues.get({
+                owner, repo, issue_number
+              });
+              
+              // 이슈에 달려있는 모든 라벨 제거
+              if (issueData.data.labels && issueData.data.labels.length > 0) {
+                for (const label of issueData.data.labels) {
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number,
+                    name: label.name
+                  });
+                }
+                console.log("모든 라벨이 제거되었습니다.");
+              } else {
+                console.log("제거할 라벨이 없습니다.");
+              }
+            } catch (e) {
+              console.log("라벨 제거 중 오류 발생:", e.message);
+            }
+
+            // 3) 상태 표시용 라벨 추가(선택)
+            await github.rest.issues.addLabels({
+              owner, repo, issue_number,
+              labels: ['Approved-Deploy']
+            });
+
       - name: Mark job started
         id: mark-start
         run: echo "started=true" >> $GITHUB_OUTPUT
